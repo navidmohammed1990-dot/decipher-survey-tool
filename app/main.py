@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes_classify import router as classify_router
 from app.api.routes_generate import router as generate_router
 from app.api.routes_parse import router as parse_router
+from app.api.routes_review import router as review_router
 from app.config import BASE_DIR, settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -41,6 +42,7 @@ if settings.cors_origins:
 app.include_router(parse_router)
 app.include_router(classify_router)
 app.include_router(generate_router)
+app.include_router(review_router)
 
 
 @app.get("/health", tags=["meta"])

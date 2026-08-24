@@ -3,41 +3,104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Decipher Survey Base Generator — Parser</title>
+<title>Decipher Survey Base Generator</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
 <header>
-  <h1>Decipher Survey Base Generator</h1>
-  <p class="subtitle">Phase&nbsp;1 — DOCX parsing &amp; formatting extraction</p>
+  <div>
+    <h1>Decipher Survey Base Generator</h1>
+    <p class="subtitle">Questionnaire &rarr; classified draft &rarr; base Decipher XML</p>
+  </div>
+  <div id="ai-status" class="ai-status" title="Local AI runtime status">checking AI…</div>
 </header>
 
+<nav class="steps" id="steps">
+  <button class="step active" data-step="upload">1 · Upload</button>
+  <button class="step" data-step="review" disabled>2 · Review</button>
+  <button class="step" data-step="export" disabled>3 · Export</button>
+</nav>
+
 <main>
-  <section id="upload-panel">
+  <!-- Step 1 -->
+  <section id="panel-upload" class="panel">
     <div id="dropzone" tabindex="0" role="button" aria-label="Upload a questionnaire">
       <p><strong>Drop a .docx questionnaire here</strong></p>
       <p class="muted">or click to choose a file</p>
       <input type="file" id="file-input" accept=".docx" hidden>
     </div>
     <p id="status" role="status" aria-live="polite"></p>
+    <div id="parse-stats" class="stats"></div>
+    <div id="parse-warnings"></div>
   </section>
 
-  <section id="results" hidden>
-    <div id="stats" class="stats"></div>
-    <div id="warnings"></div>
+  <!-- Step 2 -->
+  <section id="panel-review" class="panel" hidden>
+    <div class="review-bar">
+      <div id="review-summary" class="stats"></div>
+      <div class="review-actions">
+        <label class="inline">
+          Show
+          <select id="filter">
+            <option value="all">all questions</option>
+            <option value="flagged">flagged only</option>
+            <option value="confident">confident only</option>
+          </select>
+        </label>
+        <button id="to-export" class="primary">Continue to export →</button>
+      </div>
+    </div>
+    <div id="review-warnings"></div>
+    <div id="question-list"></div>
+  </section>
 
-    <nav class="tabs" role="tablist">
-      <button class="tab active" data-view="questions" role="tab">Questions</button>
-      <button class="tab" data-view="blocks" role="tab">Blocks</button>
-      <button class="tab" data-view="json" role="tab">JSON</button>
-    </nav>
-
-    <div id="view-questions" class="view"></div>
-    <div id="view-blocks" class="view" hidden></div>
-    <div id="view-json" class="view" hidden><pre id="json-output"></pre></div>
+  <!-- Step 3 -->
+  <section id="panel-export" class="panel" hidden>
+    <div class="review-bar">
+      <div id="export-summary" class="stats"></div>
+      <div class="review-actions">
+        <label class="inline">
+          <input type="checkbox" id="wrap-toggle" checked>
+          Wrap in &lt;survey&gt; root
+        </label>
+        <button id="download-xml" class="primary">Download .xml</button>
+      </div>
+    </div>
+    <div id="export-warnings"></div>
+    <pre id="export-output"></pre>
   </section>
 </main>
+
+<template id="question-template">
+  <article class="question-card">
+    <header class="qc-head">
+      <span class="label-pill"></span>
+      <select class="element-select" aria-label="Decipher element"></select>
+      <span class="confidence"></span>
+      <button class="toggle" aria-expanded="false">Edit</button>
+    </header>
+    <p class="qc-title"></p>
+    <p class="ai-notes"></p>
+    <div class="qc-body" hidden>
+      <label>Title<textarea data-field="title" rows="2"></textarea></label>
+      <label>Comment / instruction<textarea data-field="comment" rows="2"></textarea></label>
+      <label class="options-field">Options<textarea data-field="options" rows="5"></textarea></label>
+      <div class="grid-fields">
+        <label>Rows<textarea data-field="rows" rows="5"></textarea></label>
+        <label>Columns<textarea data-field="cols" rows="5"></textarea></label>
+      </div>
+      <label>Developer notes <span class="muted">(never exported)</span>
+        <textarea data-field="dev_notes" rows="2"></textarea></label>
+      <div class="qc-actions">
+        <button class="save primary">Save changes</button>
+        <button class="preview">Preview XML</button>
+        <span class="save-state muted"></span>
+      </div>
+      <pre class="xml-preview" hidden></pre>
+    </div>
+  </article>
+</template>
 
 <script src="/static/app.js"></script>
 </body>

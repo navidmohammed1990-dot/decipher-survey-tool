@@ -3,11 +3,19 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phase 1 — DOCX parser + formatting extraction.**
+**Status: Phases 1-4 complete — parse -> classify -> review -> export.**
 
-The parser is deterministic and is the source of truth for formatting. Later phases
-add the local AI classifier, the intermediate survey model and XML generation on
-top of the document model this phase produces.
+Upload a questionnaire, let the local AI classify it, correct anything it got
+wrong, and export base Decipher XML.
+
+> **The AI classifies. It never writes XML.**
+>
+> The model's entire output is an element type plus which *line indices* are the
+> title, comment, options, rows and columns. Text and formatting always come from
+> the parser; the XML shape is fixed, deterministic Python. If the model is
+> unreachable or returns something unusable, the tool falls back to a
+> conservative heuristic and flags every question for review — unclear AI output
+> never silently becomes production XML.
 
 ---
 
@@ -22,11 +30,25 @@ python3 -m venv .venv
 Then open <http://localhost:8000>. The server binds `0.0.0.0` by default, so other
 machines on the local network can reach it at `http://<your-ip>:8000`.
 
-| URL       | What it is                                    |
-|-----------|-----------------------------------------------|
-| `/`       | Upload a questionnaire and inspect the parse   |
-| `/docs`   | Interactive OpenAPI docs                       |
-| `/health` | Liveness check                                 |
+| URL       | What it is                                          |
+|-----------|-----------------------------------------------------|
+| `/`       | The three-step flow: upload -> review -> export      |
+| `/docs`   | Interactive OpenAPI docs                             |
+| `/health` | Liveness check                                       |
+
+### The local AI (optional)
+
+Classification calls [Ollama](https://ollama.com) on `http://localhost:11434`:
+
+```bash
+ollama serve
+ollama pull llama3.1
+```
+
+**The tool works without it.** With no model running, every question falls back
+to the conservative heuristic (title = first line, rest = options), lands at zero
+confidence, and is flagged for review. The header badge shows which mode you are
+in.
 
 ### Without the server
 
@@ -46,7 +68,7 @@ than committed, so its formatting intent stays readable in the diff.
 
 ---
 
-## What the parser extracts
+## Phase 1 — What the parser extracts
 
 `POST /api/parse` returns a `ParsedDocument`:
 
@@ -122,6 +144,88 @@ questions.
 
 ---
 
+## Phase 2 — AI classification
+
+`POST /api/classify` takes a parsed document and returns `Question` objects.
+
+One Ollama call **per question**, not per document — better accuracy and no
+context-length dropouts. `format: json`, `temperature: 0`.
+
+The model answers with indices only:
+
+```jsonc
+{"element": "checkbox", "title_lines": [0], "comment_lines": [1],
+ "option_lines": [2,3,4,5], "row_lines": [], "col_lines": [],
+ "confidence": 0.94, "notes": "select all that apply"}
+```
+
+Those indices are mapped back onto the parsed lines, which already carry Phase 1's
+bold/italic. The model never handles the text itself.
+
+Before a classification is accepted it has to survive some guards. Indices the
+question does not have are discarded rather than trusted. Structural incoherence —
+an option element with no options, a grid missing rows or columns, an empty title —
+forces `needs_review` even at high confidence. Confidence is clamped to 0-1.
+
+`threshold` is a query param (default `0.75`); anything below it opens
+pre-expanded in the review UI.
+
+## Phase 3 — XML generation
+
+`POST /api/generate` is a pure function. The same `Question` always produces the
+same bytes: no model call, no randomness, no timestamps. A test generates one
+question 25 times and asserts a single distinct output.
+
+**Text cleanup.** Curly quotes, en/em dashes and ellipses normalise to ASCII. A
+bare `&` becomes `&amp;`, but an existing `&amp;` or `&#233;` is left alone, so
+re-running the generator over escaped text cannot corrupt it. Angle brackets are
+escaped *before* bold/italic markup is added, so a literal `<script>` in a
+questionnaire cannot become a tag.
+
+**Row and column labels.** Sequential `r1, r2, r3...`, except:
+
+| Option text                           | Label | Extra attributes                     |
+|---------------------------------------|-------|--------------------------------------|
+| contains *other* **and** *specify*    | `r91` | `open="1" openSize="25" randomize="0"` |
+| *none of the above* / *none of these* | `r99` | `randomize="0"`, plus `exclusive="1"` for checkbox only |
+
+The sequential counter only advances for ordinary rows, so
+`[A, Other specify, B]` gives `r1, r91, r2`. Radio rows carry `value="N"` matching
+the label suffix; checkbox rows omit `value`. Columns number `c1, c2...` and take
+the other/specify open handling but *not* the r91/r99 convention — that is rows
+only.
+
+Radio needs no `exclusive` because only one answer is possible anyway.
+
+**Element shapes** live in one declarative table (`xml_generator.ELEMENT_SPECS`)
+ported verbatim from the canonical template. Each fragment ends with a blank line
+then `<suspend/>`.
+
+Fragments use the `atm1d:` and `ss:` prefixes **without declaring them** — those
+belong on the survey root. `GET /api/export.xml` wraps them in a placeholder
+`<survey>` root so the download opens as valid XML; replace that root with the
+team's canonical one.
+
+## Phase 4 — Programmer review
+
+| Endpoint                       | Purpose                                  |
+|--------------------------------|------------------------------------------|
+| `GET /api/questions`           | The current draft plus summary counts     |
+| `PATCH /api/questions/{label}` | Edit any field                            |
+| `POST /api/generate/{label}`   | Preview one question's XML                |
+| `GET /api/export.xml`          | Download the assembled base XML           |
+
+Every field is editable regardless of confidence — a score says where to look
+first, it never locks anything. Options, rows and columns are edited as
+line-separated text, one per line.
+
+A structural edit clears `needs_review`, on the basis that a programmer edit *is*
+the decision that was being asked for. Editing `dev_notes` alone does not — jotting
+a note is not resolving the question. `dev_notes` is stored for the programmer and
+never reaches the XML.
+
+---
+
 ## Project layout
 
 ```
@@ -129,29 +233,51 @@ app/
   main.py                       FastAPI app, static mount, entry point
   config.py                     Settings (env-overridable)
   cli.py                        Command-line parser
-  api/routes_parse.py           POST /api/parse
-  models/document.py            Pydantic output contract
-  parsing/
+  store.py                      In-memory draft under review
+  api/
+    routes_parse.py             POST /api/parse
+    routes_classify.py          POST /api/classify, GET /api/ai-status
+    routes_generate.py          POST /api/generate, GET /api/export.xml
+    routes_review.py            GET/PATCH /api/questions
+  models/
+    document.py                 Phase 1 output contract
+    survey.py                   Intermediate model shared by all phases
+  parsing/                      Phase 1 - deterministic DOCX reading
     docx_parser.py              Body traversal, block construction
     formatting.py               Run extraction + style inheritance
     numbering.py                Word list-counter replay
     question_boundaries.py      Label detection and segmentation
     normalize.py                Whitespace and marker helpers
-  static/                       Review page (no build step, no dependencies)
-tests/                          95 tests
+  classify/                     Phase 2 - the AI's narrow role
+    lines.py                    Question -> numbered source lines
+    ollama.py                   Local runtime client
+    classifier.py               Index mapping, guards, fallback
+  generate/                     Phase 3 - zero AI involvement
+    text.py                     ASCII cleanup, entity-safe escaping
+    labels.py                   r1/r91/r99 and c1..cN conventions
+    xml_generator.py            Element spec table and rendering
+    export.py                   Survey-root wrapping, well-formedness
+  static/                       Review UI (no build step, no dependencies)
+tests/                          243 tests
 ```
 
 ## Configuration
 
 All optional, via environment variables:
 
-| Variable                 | Default | Purpose                                  |
-|--------------------------|---------|------------------------------------------|
-| `DECIPHER_HOST`          | `0.0.0.0` | Bind address                            |
-| `DECIPHER_PORT`          | `8000`  | Port                                     |
-| `DECIPHER_MAX_UPLOAD_MB` | `25`    | Upload size limit                        |
-| `DECIPHER_KEEP_UPLOADS`  | unset   | Write uploads to `uploads/` (off by default — questionnaires are client-confidential) |
-| `DECIPHER_CORS_ORIGINS`  | unset   | Comma-separated origins; not needed for same-origin use |
+| Variable                    | Default                  | Purpose                        |
+|-----------------------------|--------------------------|--------------------------------|
+| `DECIPHER_HOST`             | `0.0.0.0`                | Bind address                    |
+| `DECIPHER_PORT`             | `8000`                   | Port                            |
+| `DECIPHER_MAX_UPLOAD_MB`    | `25`                     | Upload size limit               |
+| `DECIPHER_KEEP_UPLOADS`     | unset                    | Write uploads to `uploads/` (off by default — questionnaires are client-confidential) |
+| `DECIPHER_CORS_ORIGINS`     | unset                    | Comma-separated origins; not needed for same-origin use |
+| `DECIPHER_OLLAMA_URL`       | `http://localhost:11434` | Local model runtime             |
+| `DECIPHER_OLLAMA_MODEL`     | `llama3.1`               | Model name                      |
+| `DECIPHER_OLLAMA_TIMEOUT`   | `60`                     | Seconds per classification call |
+| `DECIPHER_REVIEW_THRESHOLD` | `0.75`                   | Confidence below this flags for review |
+| `DECIPHER_XMLNS_ATM1D`      | placeholder              | Namespace URI for the export's survey root |
+| `DECIPHER_XMLNS_SS`         | placeholder              | Namespace URI for the export's survey root |
 
 ---
 
@@ -178,19 +304,28 @@ These are honest boundaries of Phase 1, not defects:
 - **No question classification.** Nothing here decides radio vs. checkbox.
 - **DOCX only.** PDF and plain text are listed as later additions in the workflow.
 - **`.doc` is not supported** — only the modern zip-based `.docx` format.
+- **The draft lives in memory.** Restarting the server discards it. Storage is
+  "local files initially, database later" in the workflow doc.
+- **One draft at a time.** The tool is single-user and local by design; a second
+  upload replaces the first.
+- **Editing a title by hand drops that field's imported formatting.** Retyped text
+  becomes one plain run — silently reapplying old bold to new words would be worse
+  than losing it. Untouched fields keep their formatting.
+- **Namespace URIs in the export root are placeholders.** Set
+  `DECIPHER_XMLNS_ATM1D` / `DECIPHER_XMLNS_SS`, or paste the fragments into the
+  team's own survey root.
 
 ## Roadmap
 
 | Phase | Scope                                        | Status |
 |-------|----------------------------------------------|--------|
 | 1     | DOCX parser + formatting extraction          | ✅ done |
-| 2     | Survey JSON schema + manual test data        | next   |
-| 3     | Local AI question classification             |        |
-| 4     | Element mapping + deterministic XML generation |      |
-| 5     | Programmer review and override UI            |        |
-| 6     | Basic logic detection                        |        |
-| 7     | Validation and QA reporting                  |        |
-| 8     | Pilot on real questionnaires                 |        |
+| 2     | Survey model + local AI classification       | ✅ done |
+| 3     | Deterministic XML generation                 | ✅ done |
+| 4     | Programmer review and override UI            | ✅ done |
+| 5     | Basic logic detection                        | next   |
+| 6     | Validation and QA reporting                  |        |
+| 7     | Pilot on real questionnaires                 |        |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.
