@@ -40,6 +40,8 @@ class Settings:
     ollama_model: str = os.environ.get("DECIPHER_OLLAMA_MODEL", "llama3.1")
     ollama_timeout: float = float(os.environ.get("DECIPHER_OLLAMA_TIMEOUT", "60"))
     review_threshold: float = float(os.environ.get("DECIPHER_REVIEW_THRESHOLD", "0.75"))
+    #: Projected remaining time above which the review screen suggests batching.
+    slow_classify_seconds: float = float(os.environ.get("DECIPHER_SLOW_CLASSIFY_SECONDS", "150"))
 
     # -- resource tags (Phase 5) --
     #: Any file containing <res label="...">...</res> entries. Point this at the

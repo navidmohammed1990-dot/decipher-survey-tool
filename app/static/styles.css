@@ -213,3 +213,69 @@ pre {
   .qc-body { background: #191d24; }
   .ai-status.up { border-color: #2f6a4c; }
 }
+
+
+/* -- question picker (pre-classification) ------------------------------- */
+
+.section-title { font-size: 15px; margin: 4px 0 10px; }
+
+.picker-list {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 44vh;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.picker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid #eef0f4;
+  font-size: 14px;
+  cursor: pointer;
+}
+.picker-row:last-child { border-bottom: none; }
+.picker-row:hover { background: var(--accent-soft); }
+.picker-row .pk-label { font-weight: 600; min-width: 46px; font-size: 12.5px; }
+.picker-row .pk-title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-row .pk-done { margin-left: auto; font-size: 11.5px; color: var(--good); white-space: nowrap; }
+.picker-footer { margin-bottom: 14px; }
+
+button.ghost { font-size: 13px; padding: 5px 11px; }
+input[type="text"] {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* -- progress ----------------------------------------------------------- */
+
+#progress-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.progress-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.progress-track {
+  height: 8px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 10px 0 8px;
+}
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width .3s ease;
+}
+#progress-detail { margin: 0; }
+
+.resource-select, .subject-select { width: 100%; margin-top: 4px; }

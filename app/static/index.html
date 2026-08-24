@@ -33,6 +33,38 @@
     <p id="status" role="status" aria-live="polite"></p>
     <div id="parse-stats" class="stats"></div>
     <div id="parse-warnings"></div>
+
+    <!-- Questions found, shown before committing to classification. -->
+    <div id="picker" hidden>
+      <div class="review-bar">
+        <h2 class="section-title">Questions found</h2>
+        <div class="review-actions">
+          <button id="select-all" class="ghost">Select all</button>
+          <button id="select-none" class="ghost">Clear</button>
+          <label class="inline">Range
+            <input id="range-input" type="text" placeholder="Q1-Q15" size="10">
+          </label>
+          <button id="apply-range" class="ghost">Apply</button>
+        </div>
+      </div>
+      <p class="muted" id="picker-hint"></p>
+      <div id="picker-list" class="picker-list"></div>
+      <div class="review-actions picker-footer">
+        <button id="classify-btn" class="primary">Classify selected</button>
+        <span id="picker-count" class="muted"></span>
+      </div>
+    </div>
+
+    <!-- Live progress for the classify phase. -->
+    <div id="progress-panel" hidden>
+      <div class="progress-head">
+        <strong id="progress-label">Classifying…</strong>
+        <button id="cancel-btn" class="ghost">Cancel</button>
+      </div>
+      <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+      <p id="progress-detail" class="muted"></p>
+      <div id="progress-warning"></div>
+    </div>
   </section>
 
   <!-- Step 2 -->
@@ -84,7 +116,14 @@
     <p class="ai-notes"></p>
     <div class="qc-body" hidden>
       <label>Title<textarea data-field="title" rows="2"></textarea></label>
-      <label>Comment / instruction<textarea data-field="comment" rows="2"></textarea></label>
+      <label>Comment / instruction
+        <select class="resource-select"></select>
+      </label>
+      <label class="custom-comment" hidden>Custom comment text
+        <textarea data-field="comment" rows="2"></textarea></label>
+      <label class="subject-field" hidden>Grid rows describe
+        <select class="subject-select"></select>
+      </label>
       <label class="options-field">Options<textarea data-field="options" rows="5"></textarea></label>
       <div class="grid-fields">
         <label>Rows<textarea data-field="rows" rows="5"></textarea></label>

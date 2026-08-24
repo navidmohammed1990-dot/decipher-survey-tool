@@ -12,6 +12,11 @@ const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
 
 let draft = { questions: [], summary: {}, review_threshold: 0.75 };
+let parsedDocument = null;
+let activeJobId = null;
+let pollTimer = null;
+let resourceCatalog = [];
+let subjectTypes = [];
 
 /* -- step navigation ---------------------------------------------------- */
 
@@ -71,30 +76,210 @@ dropzone.addEventListener("drop", (event) => {
 async function run(file) {
   try {
     setStatus(`Parsing ${file.name}…`);
+    $("picker").hidden = true;
+    $("progress-panel").hidden = true;
+
     const body = new FormData();
     body.append("file", file);
-    const parsed = await jsonOrThrow(await fetch("/api/parse", { method: "POST", body }));
-    renderParseStats(parsed);
-
-    setStatus(`Classifying ${parsed.questions.length} question(s)… this can take a moment.`);
-    const classified = await jsonOrThrow(
-      await fetch("/api/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed),
-      })
-    );
-
-    draft = classified;
-    renderWarnings("review-warnings", classified.warnings);
-    renderReview();
-    enableStep("review");
-    enableStep("export");
-    showStep("review");
-    setStatus(`Parsed and classified ${file.name}.`);
+    parsedDocument = await jsonOrThrow(await fetch("/api/parse", { method: "POST", body }));
+    renderParseStats(parsedDocument);
+    renderPicker();
+    setStatus(`Found ${classifiableQuestions().length} question(s). Choose which to classify.`);
   } catch (error) {
     setStatus(error.message, true);
   }
+}
+
+/* -- question picker: parse covers everything, the SP picks the batch ---- */
+
+function classifiableQuestions() {
+  return (parsedDocument?.questions || []).filter((q) => !q.is_preamble && q.label);
+}
+
+function renderPicker() {
+  const questions = classifiableQuestions();
+  const done = new Set(draft.questions.map((q) => q.label));
+
+  $("picker-list").replaceChildren(
+    ...questions.map((question) => {
+      const row = el("label", "picker-row");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = question.label;
+      box.checked = !done.has(question.label);
+      box.addEventListener("change", updatePickerCount);
+
+      row.append(box, el("span", "pk-label", question.label),
+                 el("span", "pk-title", question.title_text || "(no title)"));
+      if (done.has(question.label)) row.append(el("span", "pk-done", "✓ classified"));
+      return row;
+    })
+  );
+
+  $("picker-hint").textContent = done.size
+    ? `${done.size} already classified. A new batch merges into the same review set.`
+    : "Large questionnaires are quicker to review in batches.";
+  $("picker").hidden = false;
+  updatePickerCount();
+}
+
+const pickerBoxes = () => [...document.querySelectorAll("#picker-list input[type=checkbox]")];
+const selectedLabels = () => pickerBoxes().filter((b) => b.checked).map((b) => b.value);
+
+function updatePickerCount() {
+  const count = selectedLabels().length;
+  $("picker-count").textContent = `${count} selected`;
+  $("classify-btn").disabled = count === 0;
+}
+
+$("select-all").addEventListener("click", () => {
+  pickerBoxes().forEach((box) => { box.checked = true; });
+  updatePickerCount();
+});
+$("select-none").addEventListener("click", () => {
+  pickerBoxes().forEach((box) => { box.checked = false; });
+  updatePickerCount();
+});
+$("apply-range").addEventListener("click", applyRange);
+$("range-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); applyRange(); }
+});
+
+/** Accepts "Q1-Q15", "1-15", or a comma-separated list of labels. */
+function applyRange() {
+  const raw = $("range-input").value.trim();
+  if (!raw) return;
+
+  const labels = classifiableQuestions().map((q) => q.label);
+  const match = raw.match(/^\s*([A-Za-z]*)(\d+)\s*[-–—]\s*([A-Za-z]*)(\d+)\s*$/);
+  let wanted;
+
+  if (match) {
+    const prefix = (match[1] || match[3] || "Q").toUpperCase();
+    const from = Number(match[2]);
+    const to = Number(match[4]);
+    const [lo, hi] = from <= to ? [from, to] : [to, from];
+    wanted = new Set();
+    for (let n = lo; n <= hi; n += 1) wanted.add(`${prefix}${n}`);
+  } else {
+    wanted = new Set(raw.split(/[,\s]+/).filter(Boolean).map((s) => s.toUpperCase()));
+  }
+
+  const matched = labels.filter((label) => wanted.has(label));
+  pickerBoxes().forEach((box) => { box.checked = wanted.has(box.value); });
+  updatePickerCount();
+
+  setStatus(
+    matched.length
+      ? `Selected ${matched.length} question(s) matching "${raw}".`
+      : `No questions matched "${raw}".`,
+    matched.length === 0
+  );
+}
+
+/* -- classification job with real progress ------------------------------ */
+
+$("classify-btn").addEventListener("click", startClassification);
+$("cancel-btn").addEventListener("click", cancelClassification);
+
+async function startClassification() {
+  const labels = selectedLabels();
+  if (!labels.length) return;
+
+  try {
+    $("classify-btn").disabled = true;
+    const job = await jsonOrThrow(
+      await fetch("/api/classify/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document: parsedDocument, labels }),
+      })
+    );
+    activeJobId = job.job_id;
+    showProgress(0, job.total, null);
+    $("progress-panel").hidden = false;
+    setStatus("");
+    pollJob();
+  } catch (error) {
+    setStatus(error.message, true);
+    $("classify-btn").disabled = false;
+  }
+}
+
+function pollJob() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    if (!activeJobId) return;
+    try {
+      const status = await jsonOrThrow(await fetch(`/api/classify/${activeJobId}/status`));
+      showProgress(status.completed, status.total, status.estimated_remaining_seconds);
+      renderWarnings(
+        "progress-warning",
+        status.slow
+          ? ["This is taking longer than expected — you can keep waiting, or cancel and " +
+             "process this in smaller batches. Questions already done are kept either way."]
+          : []
+      );
+
+      if (status.state === "running") {
+        pollJob();
+      } else {
+        await finishJob(status);
+      }
+    } catch (error) {
+      setStatus(error.message, true);
+      activeJobId = null;
+      $("classify-btn").disabled = false;
+    }
+  }, 1000);
+}
+
+async function cancelClassification() {
+  if (!activeJobId) return;
+  $("cancel-btn").disabled = true;
+  try {
+    await fetch(`/api/classify/${activeJobId}/cancel`, { method: "POST" });
+  } finally {
+    $("cancel-btn").disabled = false;
+  }
+}
+
+async function finishJob(status) {
+  clearTimeout(pollTimer);
+  activeJobId = null;
+  $("classify-btn").disabled = false;
+  $("progress-panel").hidden = true;
+
+  draft = await jsonOrThrow(await fetch("/api/questions"));
+  renderReview();
+  renderPicker();
+  enableStep("review");
+  enableStep("export");
+  showStep("review");
+
+  const done = status.state === "cancelled"
+    ? `Cancelled after ${status.completed} of ${status.total}. Completed questions were kept.`
+    : `Classified ${status.completed} question(s).`;
+  const fell = status.fallback_count
+    ? ` ${status.fallback_count} used the offline fallback and need review.`
+    : "";
+  setStatus(done + fell);
+}
+
+function showProgress(completed, total, remainingSeconds) {
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  $("progress-bar").style.width = `${percent}%`;
+  $("progress-label").textContent = `Classifying ${completed} of ${total}…`;
+  $("progress-detail").textContent =
+    remainingSeconds === null || remainingSeconds === undefined
+      ? "Estimating time remaining…"
+      : `About ${formatDuration(remainingSeconds)} remaining`;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 45) return `${Math.max(1, Math.round(seconds))}s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes <= 1 ? "1 minute" : `${minutes} minutes`;
 }
 
 async function jsonOrThrow(response) {
@@ -208,6 +393,8 @@ function questionCard(question) {
 
   field(card, "title").value = runsText(question.title);
   field(card, "comment").value = runsText(question.comment);
+  buildResourceSelect(card, question);
+  buildSubjectSelect(card, question);
   field(card, "options").value = optionsText(question.options);
   field(card, "rows").value = optionsText(question.rows);
   field(card, "cols").value = optionsText(question.cols);
@@ -234,6 +421,64 @@ function openCard(body, toggle, open) {
 function applyElementVisibility(card, element) {
   card.querySelector(".options-field").hidden = !OPTION_ELEMENTS.has(element);
   card.querySelector(".grid-fields").hidden = !GRID_ELEMENTS.has(element);
+  card.querySelector(".subject-field").hidden = !GRID_ELEMENTS.has(element);
+}
+
+/** Comment source: a resource tag, or custom text.
+ *
+ *  Preview text sits next to each tag so the programmer can see what they are
+ *  picking; the generator still emits only the ${res.X} reference.
+ */
+function buildResourceSelect(card, question) {
+  const select = card.querySelector(".resource-select");
+  select.replaceChildren();
+
+  for (const entry of resourceCatalog) {
+    const option = document.createElement("option");
+    option.value = entry.label;
+    option.textContent = `${entry.label} — ${entry.text}`;
+    select.append(option);
+  }
+  const custom = document.createElement("option");
+  custom.value = "";
+  custom.textContent = "Custom text…";
+  select.append(custom);
+
+  select.value = question.comment_resource || "";
+  applyCommentMode(card, select.value);
+  select.addEventListener("change", () => applyCommentMode(card, select.value));
+}
+
+function applyCommentMode(card, value) {
+  card.querySelector(".custom-comment").hidden = value !== "";
+}
+
+function buildSubjectSelect(card, question) {
+  const select = card.querySelector(".subject-select");
+  select.replaceChildren(
+    ...subjectTypes.map((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      return option;
+    })
+  );
+  select.value = question.subject_type || "none";
+
+  // A grid's subject picks between the SRBrand / SRStatement variants, so the
+  // comment tag has to follow it.
+  select.addEventListener("change", () => {
+    const element = card.querySelector(".element-select").value;
+    if (!GRID_ELEMENTS.has(element)) return;
+    const prefix = element === "radio_grid" ? "SR" : "MR";
+    const suffix = select.value === "none" ? "Statement"
+      : select.value.charAt(0).toUpperCase() + select.value.slice(1);
+    const resource = card.querySelector(".resource-select");
+    if (resource.value !== "" && [...resource.options].some((o) => o.value === prefix + suffix)) {
+      resource.value = prefix + suffix;
+      applyCommentMode(card, resource.value);
+    }
+  });
 }
 
 const field = (card, name) => card.querySelector(`[data-field="${name}"]`);
@@ -250,6 +495,9 @@ async function saveCard(card) {
 
   const patch = {
     element: card.querySelector(".element-select").value,
+    subject_type: card.querySelector(".subject-select").value,
+    // "" means custom text; the server reads it as "clear the tag".
+    comment_resource: card.querySelector(".resource-select").value,
     title: field(card, "title").value,
     comment: field(card, "comment").value,
     options: field(card, "options").value,
@@ -341,6 +589,17 @@ function el(tag, className, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
+
+(async function loadResources() {
+  try {
+    const body = await (await fetch("/api/resources")).json();
+    resourceCatalog = body.resources || [];
+    subjectTypes = body.subject_types || [];
+  } catch {
+    resourceCatalog = [];
+    subjectTypes = ["brand", "category", "product", "statement", "none"];
+  }
+})();
 
 (async function checkAi() {
   const badge = $("ai-status");

@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-4 complete — parse -> classify -> review -> export.**
+**Status: Phases 1-5 complete — parse -> classify -> review -> export.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -226,6 +226,96 @@ never reaches the XML.
 
 ---
 
+## Phase 5 — Resource tags, progress and batching
+
+### Resource tags
+
+Comments reference the team's reusable snippets rather than duplicating their
+text. Decipher resolves `${res.X}` at survey runtime, so the generator emits the
+**literal reference and never the resolved text** — resolving early would bake in
+wording the team may later change.
+
+The catalog is parsed from the reference template, not hardcoded:
+
+```bash
+DECIPHER_TEMPLATE_XML=/path/to/Standard_Template_Questions_V1_24Aug26.xml ./run.sh
+```
+
+The scan is textual and finds `<res>` entries anywhere in a file, so the team's
+full survey template works as-is. `reference/res_catalog.xml` is a stand-in
+carrying the twelve per-question comment tags until that file is dropped in. A
+missing template is not fatal — tag *selection* is pure logic; only the preview
+text in the review UI is lost.
+
+> Because the scan is textual, a commented-out `<res>` entry would also be
+> picked up. Keep example markup out of comments in the template.
+
+Selection is deterministic, never AI-chosen:
+
+| element                   | subject_type          | tag             |
+|---------------------------|-----------------------|-----------------|
+| `radio`                   | —                     | `SR`            |
+| `checkbox`                | —                     | `MR`            |
+| `textarea` / `text`       | —                     | `Open`          |
+| `select`                  | —                     | `Ranking`       |
+| `radio_grid`              | brand/category/product | `SRBrand` / `SRCategory` / `SRProduct` |
+| `radio_grid`              | statement / none      | `SRStatement`   |
+| `checkbox_grid`           | brand/category/product | `MRBrand` / `MRCategory` / `MRProduct` |
+| `checkbox_grid`           | statement / none      | `MRStatement`   |
+| `html`                    | —                     | none            |
+
+The AI's only new job is `subject_type` for grids — what the rows describe —
+inferred under the same indices-only discipline. Anything unusable becomes
+`statement`, the most generic wording. Non-grid elements never carry a subject.
+
+**`number` is the one gap:** the catalog has no numeric snippet, so it keeps its
+literal `Please enter a whole number`. Add `<res label="Numeric">` to the template
+and move the entry from `LITERAL_COMMENT_DEFAULTS` into `_FLAT_TAGS` to convert it.
+
+**Override, always available.** The review screen's comment field is a dropdown of
+every tag with its preview text, plus **Custom text…** which reveals a free-text
+box. Changing element or subject re-derives the tag, but never overwrites a custom
+comment a programmer deliberately chose.
+
+### Progress and batching
+
+Parsing always covers the whole document — it is fast and free of AI cost — so the
+question list appears **before** committing to classification. From there the
+programmer picks a batch: individually, **Select all**, or a range like `Q1-Q15`.
+
+Classification runs as a background job:
+
+| Endpoint                          | Purpose                                |
+|-----------------------------------|----------------------------------------|
+| `POST /api/classify/start`        | Begin a batch, returns a `job_id`       |
+| `GET /api/classify/{job_id}/status` | Poll progress                         |
+| `POST /api/classify/{job_id}/cancel` | Stop without discarding work         |
+
+Status reports real numbers, not an animation:
+
+```jsonc
+{"completed": 12, "total": 40, "elapsed_seconds": 95.0,
+ "estimated_remaining_seconds": 220.4, "slow": false}
+```
+
+The estimate projects from the running average of questions actually completed, so
+it sharpens as the job runs. Before the first result it is `null` rather than a
+guess — no fabricated ETA. When the projection exceeds
+`DECIPHER_SLOW_CLASSIFY_SECONDS`, `slow` trips and the UI suggests batching.
+
+**Cancelling keeps completed work.** Each question is merged into the draft as it
+lands, so stopping a long run leaves everything already classified intact and
+generatable.
+
+**Batches merge by label.** Classifying `Q16-Q30` after `Q1-Q15` extends the review
+set to 30 rather than replacing it, and a late batch sorts back into document
+order. Re-running a label replaces just that question. Programmer edits made
+between batches survive. Uploading a *different* questionnaire starts a fresh set
+rather than merging into the previous one.
+
+
+---
+
 ## Project layout
 
 ```
@@ -257,8 +347,13 @@ app/
     labels.py                   r1/r91/r99 and c1..cN conventions
     xml_generator.py            Element spec table and rendering
     export.py                   Survey-root wrapping, well-formedness
+  classify/
+    jobs.py                     Background jobs, progress, cancellation
+  generate/
+    resources.py                <res> catalog and the element -> tag map
   static/                       Review UI (no build step, no dependencies)
-tests/                          243 tests
+reference/res_catalog.xml       Stand-in resource catalog
+tests/                          313 tests
 ```
 
 ## Configuration
@@ -276,6 +371,8 @@ All optional, via environment variables:
 | `DECIPHER_OLLAMA_MODEL`     | `llama3.1`               | Model name                      |
 | `DECIPHER_OLLAMA_TIMEOUT`   | `60`                     | Seconds per classification call |
 | `DECIPHER_REVIEW_THRESHOLD` | `0.75`                   | Confidence below this flags for review |
+| `DECIPHER_SLOW_CLASSIFY_SECONDS` | `150`               | Projected wait above which the UI suggests batching |
+| `DECIPHER_TEMPLATE_XML`     | `reference/res_catalog.xml` | File to read `<res>` tags from |
 | `DECIPHER_XMLNS_ATM1D`      | placeholder              | Namespace URI for the export's survey root |
 | `DECIPHER_XMLNS_SS`         | placeholder              | Namespace URI for the export's survey root |
 
@@ -323,9 +420,10 @@ These are honest boundaries of Phase 1, not defects:
 | 2     | Survey model + local AI classification       | ✅ done |
 | 3     | Deterministic XML generation                 | ✅ done |
 | 4     | Programmer review and override UI            | ✅ done |
-| 5     | Basic logic detection                        | next   |
-| 6     | Validation and QA reporting                  |        |
-| 7     | Pilot on real questionnaires                 |        |
+| 5     | Resource tags, progress and batching         | ✅ done |
+| 6     | Basic logic detection                        | next   |
+| 7     | Validation and QA reporting                  |        |
+| 8     | Pilot on real questionnaires                 |        |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.
