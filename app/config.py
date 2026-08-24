@@ -41,6 +41,13 @@ class Settings:
     ollama_timeout: float = float(os.environ.get("DECIPHER_OLLAMA_TIMEOUT", "60"))
     review_threshold: float = float(os.environ.get("DECIPHER_REVIEW_THRESHOLD", "0.75"))
 
+    # -- resource tags (Phase 5) --
+    #: Any file containing <res label="...">...</res> entries. Point this at the
+    #: team's Standard_Template_Questions XML; the bundled file is a stand-in.
+    template_xml: Path = Path(
+        os.environ.get("DECIPHER_TEMPLATE_XML", str(BASE_DIR / "reference" / "res_catalog.xml"))
+    )
+
     # -- XML export (Phase 3) --
     #: Placeholder namespace URIs for the survey root. The generated *fragments*
     #: use these prefixes without declaring them, which is correct — the team's

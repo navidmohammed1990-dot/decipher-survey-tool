@@ -13,6 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.generate.labels import LabelledLine, label_cols, label_rows
+from app.generate.resources import (
+    LITERAL_COMMENT_DEFAULTS,
+    reference,
+    resource_tag_for,
+)
 from app.generate.text import clean, option_markup, runs_to_markup
 from app.models.survey import SUPPORTED_ELEMENTS, Question
 
@@ -30,7 +35,6 @@ class ElementSpec:
 
     tag: str
     attrs: dict[str, str] = field(default_factory=dict)
-    comment_default: str = ""
     validate: str = ""
     """``CheckBlank`` argument, e.g. ``"1"``. Empty means no validate element."""
     has_rows: bool = False
@@ -51,7 +55,6 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
             "uses": "atm1d.10",
             "values": "order",
         },
-        comment_default="${res.SR}",
         validate="1",
         has_rows=True,
         row_values=True,
@@ -67,7 +70,6 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
             "ss:listDisplay": "1",
             "uses": "atm1d.10",
         },
-        comment_default="${res.MR}",
         validate="1",
         has_rows=True,
         # Checkbox rows omit value — matches the canonical template exactly.
@@ -76,19 +78,16 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
     "textarea": ElementSpec(
         tag="textarea",
         attrs={"height": "10", "optional": "0", "randomize": "0", "width": "50"},
-        comment_default="${res.Open}",
         validate="2",
     ),
     "text": ElementSpec(
         tag="text",
         attrs={"optional": "0", "randomize": "0", "size": "25"},
-        comment_default="${res.Open}",
         validate="2",
     ),
     "number": ElementSpec(
         tag="number",
         attrs={"size": "3", "optional": "0"},
-        comment_default="Please enter a whole number",
     ),
     "select": ElementSpec(
         tag="select",
@@ -98,14 +97,12 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
     "radio_grid": ElementSpec(
         tag="radio",
         attrs={"randomize": "0"},
-        comment_default="${res.SR}",
         has_rows=True,
         has_cols=True,
     ),
     "checkbox_grid": ElementSpec(
         tag="checkbox",
         attrs={"atleast": "1", "randomize": "0"},
-        comment_default="${res.MR}",
         has_rows=True,
         has_cols=True,
     ),
@@ -142,6 +139,35 @@ def _rows_for(question: Question, spec: ElementSpec) -> list[LabelledLine]:
     return label_rows(source, element=question.element)
 
 
+
+def comment_body(question: Question) -> str:
+    """The contents of ``<comment>``, or an empty string for no comment.
+
+    A resource label emits the literal ``${res.X}`` reference — Decipher
+    resolves it at survey runtime, so resolving it here would bake in text the
+    team may later change. ``comment_resource=None`` means the programmer chose
+    custom text instead.
+    """
+    if question.comment_resource:
+        return reference(question.comment_resource)
+
+    custom = runs_to_markup(question.comment)
+    if custom:
+        return custom
+
+    # Nothing chosen: fall back to the deterministic tag for this element, so
+    # tag selection holds even for a Question built outside the classifier.
+    auto = resource_tag_for(question.element, question.subject_type)
+    if auto:
+        return reference(auto)
+    return clean(LITERAL_COMMENT_DEFAULTS.get(question.element, ""))
+
+
+def auto_comment_resource(question: Question) -> str | None:
+    """The tag a question would get automatically, ignoring any override."""
+    return resource_tag_for(question.element, question.subject_type)
+
+
 def generate_question(question: Question) -> str:
     """Render one question as a Decipher XML fragment.
 
@@ -163,7 +189,7 @@ def generate_question(question: Question) -> str:
     lines = [_open_tag(spec.tag, question.label, spec.attrs)]
     lines.append(f"{INDENT}<title>{title}</title>")
 
-    comment = runs_to_markup(question.comment) or clean(spec.comment_default)
+    comment = comment_body(question)
     if comment:
         lines.append(f"{INDENT}<comment>{comment}</comment>")
 

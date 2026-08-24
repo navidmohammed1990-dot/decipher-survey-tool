@@ -1,0 +1,28 @@
+<!--
+  STAND-IN resource catalog.
+
+  The real catalog lives in the team's Standard_Template_Questions_V1_24Aug26.xml.
+  Drop that file anywhere and point DECIPHER_TEMPLATE_XML at it — the loader
+  scans any file for res-label blocks, so a full survey template works as-is
+  and this file becomes unused.
+
+  Note: the scan is textual, so a commented-out entry would also be picked up.
+  Keep example markup out of comments in this file.
+
+  The entries below are the per-question comment tags only. The real template
+  also defines error messages and system text, which this feature ignores.
+-->
+<resources>
+  <res label="SR">Please select one response.</res>
+  <res label="MR">Please select all that apply.</res>
+  <res label="Open">Please type in the box provided.</res>
+  <res label="SRBrand">Please select one response for each brand.</res>
+  <res label="MRBrand">Please select all that apply for each brand.</res>
+  <res label="SRCategory">Please select one response for each category.</res>
+  <res label="MRCategory">Please select all that apply for each category.</res>
+  <res label="SRProduct">Please select one response for each product.</res>
+  <res label="MRProduct">Please select all that apply for each product.</res>
+  <res label="SRStatement">Please select one response for each statement.</res>
+  <res label="MRStatement">Please select all that apply for each statement.</res>
+  <res label="Ranking">Please drag and drop the options OR Please click each item / options to rank.</res>
+</resources>

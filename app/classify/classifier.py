@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.classify.lines import SourceLine, question_lines
 from app.classify.ollama import OllamaClient, OllamaError
 from app.models.document import ParsedDocument, TextRun
+from app.generate.resources import DEFAULT_SUBJECT_TYPE, SUBJECT_TYPES, resource_tag_for
 from app.models.survey import (
     GRID_ELEMENTS,
     OPTION_ELEMENTS,
@@ -36,10 +37,16 @@ Classify ONE questionnaire question. Element must be one of: radio, checkbox,
 radio_grid, checkbox_grid, textarea, text, number, select, html.
 Identify which given line indices are the title, the comment/instruction,
 the options, and (grids only) the rows and columns. Use ONLY given indices -
-never invent or rewrite text. Respond with ONLY JSON:
+never invent or rewrite text.
+For grids only, also say what the ROWS describe with subject_type: one of
+brand, category, product, statement, none. Rows naming companies or labels a
+shopper would recognise are "brand"; rows naming product types are "product";
+rows naming market sectors are "category"; rows that are opinions or
+attitudes are "statement". Use "statement" if unclear.
+Respond with ONLY JSON:
 {"element": "checkbox", "title_lines": [0], "comment_lines": [1],
  "option_lines": [2,3,4], "row_lines": [], "col_lines": [],
- "confidence": 0.9, "notes": "brief reason"}"""
+ "subject_type": "none", "confidence": 0.9, "notes": "brief reason"}"""
 
 
 class ClassificationOutcome(BaseModel):
@@ -101,6 +108,21 @@ def _coerce_confidence(value) -> float:
         return 0.0
 
 
+
+def _coerce_subject_type(value, element: str) -> str:
+    """What a grid's rows describe.
+
+    Only grids carry a subject; for anything else it is always "none". An
+    unusable answer on a grid becomes "statement", the most generic wording.
+    """
+    if element not in GRID_ELEMENTS:
+        return "none"
+    if isinstance(value, str) and value.lower() in SUBJECT_TYPES:
+        resolved = value.lower()
+        return DEFAULT_SUBJECT_TYPE if resolved == "none" else resolved
+    return DEFAULT_SUBJECT_TYPE
+
+
 def interpret_response(
     payload: dict, label: str, lines: list[SourceLine], threshold: float
 ) -> ClassificationOutcome:
@@ -128,9 +150,12 @@ def interpret_response(
 
     confidence = _coerce_confidence(payload.get("confidence"))
     notes = payload.get("notes")
+    subject_type = _coerce_subject_type(payload.get("subject_type"), element)
     question = Question(
         label=label,
         element=element,
+        subject_type=subject_type,
+        comment_resource=resource_tag_for(element, subject_type),
         title=_runs_for(picks["title_lines"], by_index),
         comment=_runs_for(picks["comment_lines"], by_index),
         options=_options_for(picks["option_lines"], by_index),
@@ -176,6 +201,7 @@ def fallback_question(label: str, lines: list[SourceLine]) -> Question:
     return Question(
         label=label,
         element="radio",
+        comment_resource=resource_tag_for("radio"),
         title=list(lines[0].runs) if lines else [],
         options=_options_for([line.index for line in lines[1:]], {l.index: l for l in lines}),
         confidence=0.0,

@@ -8,11 +8,20 @@ crosses between those stages.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.models.document import TextRun  # re-exported: one run type across all phases
 
-__all__ = ["SUPPORTED_ELEMENTS", "TextRun", "OptionLine", "Question", "QuestionDraft"]
+__all__ = [
+    "SUPPORTED_ELEMENTS",
+    "SubjectType",
+    "TextRun",
+    "OptionLine",
+    "Question",
+    "QuestionDraft",
+]
 
 #: The Decipher elements V1 supports. Anything outside this list is a
 #: programmer decision, not an AI one.
@@ -33,6 +42,10 @@ OPTION_ELEMENTS = frozenset({"radio", "checkbox", "select"})
 
 #: Elements that carry both ``rows`` and ``cols``.
 GRID_ELEMENTS = frozenset({"radio_grid", "checkbox_grid"})
+
+#: What a grid's rows describe. Only meaningful for grids; it selects between
+#: the ``SRBrand`` / ``SRCategory`` / ``SRProduct`` / ``SRStatement`` variants.
+SubjectType = Literal["brand", "category", "product", "statement", "none"]
 
 
 class OptionLine(BaseModel):
@@ -67,6 +80,14 @@ class Question(BaseModel):
     options: list[OptionLine] = Field(default_factory=list)
     rows: list[OptionLine] = Field(default_factory=list)
     cols: list[OptionLine] = Field(default_factory=list)
+    subject_type: SubjectType = "none"
+    """What the grid's rows describe. Ignored for non-grid elements."""
+    comment_resource: str | None = None
+    """Resource label to emit as ``${res.X}``.
+
+    ``None`` means the comment is custom text taken from :attr:`comment`, which
+    is how a programmer overrides the automatic tag.
+    """
     confidence: float = 0.0
     needs_review: bool = True
     ai_notes: str = ""

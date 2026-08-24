@@ -225,7 +225,7 @@ def test_checkbox_rows_omit_value():
          "${res.Open}", "CheckBlank(2,Q1)"),
         ("number", [("size", "3"), ("optional", "0")],
          "Please enter a whole number", None),
-        ("select", [("optional", "0")], None, None),
+        ("select", [("optional", "0")], "${res.Ranking}", None),
     ],
 )
 def test_open_and_simple_element_shapes(element, expected_attrs, comment, validate):
@@ -260,7 +260,7 @@ def test_radio_grid_has_rows_and_cols_without_values():
     assert '<row label="r1">Statement 1</row>' in xml_text
     assert '<col label="c1">Agree</col>' in xml_text
     assert "value=" not in xml_text
-    assert "<comment>${res.SR}</comment>" in xml_text
+    assert "<comment>${res.SRStatement}</comment>" in xml_text
 
 
 def test_checkbox_grid_adds_atleast():
@@ -270,7 +270,7 @@ def test_checkbox_grid_adds_atleast():
 
     assert attrs_of(xml_text) == [("label", "Q1"), ("atleast", "1"), ("randomize", "0")]
     assert xml_text.startswith("<checkbox ")
-    assert "<comment>${res.MR}</comment>" in xml_text
+    assert "<comment>${res.MRStatement}</comment>" in xml_text
 
 
 def test_grids_read_rows_not_options():
