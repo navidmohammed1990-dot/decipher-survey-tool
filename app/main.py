@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes_classify import router as classify_router
 from app.api.routes_parse import router as parse_router
 from app.config import BASE_DIR, settings
 
@@ -37,6 +38,7 @@ if settings.cors_origins:
     )
 
 app.include_router(parse_router)
+app.include_router(classify_router)
 
 
 @app.get("/health", tags=["meta"])

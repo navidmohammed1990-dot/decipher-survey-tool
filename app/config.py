@@ -35,5 +35,19 @@ class Settings:
         if origin.strip()
     )
 
+    # -- local AI (Phase 2) --
+    ollama_url: str = os.environ.get("DECIPHER_OLLAMA_URL", "http://localhost:11434")
+    ollama_model: str = os.environ.get("DECIPHER_OLLAMA_MODEL", "llama3.1")
+    ollama_timeout: float = float(os.environ.get("DECIPHER_OLLAMA_TIMEOUT", "60"))
+    review_threshold: float = float(os.environ.get("DECIPHER_REVIEW_THRESHOLD", "0.75"))
+
+    # -- XML export (Phase 3) --
+    #: Placeholder namespace URIs for the survey root. The generated *fragments*
+    #: use these prefixes without declaring them, which is correct — the team's
+    #: canonical survey root declares them. Override before shipping exports
+    #: that must open standalone.
+    xmlns_atm1d: str = os.environ.get("DECIPHER_XMLNS_ATM1D", "http://decipherinc.com/atm1d")
+    xmlns_ss: str = os.environ.get("DECIPHER_XMLNS_SS", "http://decipherinc.com/ss")
+
 
 settings = Settings()

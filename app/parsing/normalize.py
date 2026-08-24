@@ -69,3 +69,13 @@ def normalize_for_matching(text: str) -> str:
     for source, target in _SPACE_LIKE_1TO1.items():
         text = text.replace(source, target)
     return text
+
+
+def literal_marker_span(text: str) -> tuple[str, int] | None:
+    """Return ``(marker, end_offset)`` for a marker typed at the start of ``text``.
+
+    The offset is into the original string, so it can be used to trim runs
+    without disturbing their formatting.
+    """
+    match = LITERAL_MARKER.match(normalize_for_matching(text))
+    return (match.group("marker").strip(), match.end()) if match else None
