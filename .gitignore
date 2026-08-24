@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Local runtime data
+uploads/
+data/
+*.log
+
+# Generated test fixtures
+tests/fixtures/*.docx
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

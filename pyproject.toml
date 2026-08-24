@@ -1,0 +1,9 @@
+[project]
+name = "decipher-survey-tool"
+version = "0.1.0"
+description = "AI-assisted Decipher survey base generator — Phase 1: DOCX parser and formatting extraction"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

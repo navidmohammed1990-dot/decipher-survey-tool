@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decipher Survey Base Generator — Parser</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header>
+  <h1>Decipher Survey Base Generator</h1>
+  <p class="subtitle">Phase&nbsp;1 — DOCX parsing &amp; formatting extraction</p>
+</header>
+
+<main>
+  <section id="upload-panel">
+    <div id="dropzone" tabindex="0" role="button" aria-label="Upload a questionnaire">
+      <p><strong>Drop a .docx questionnaire here</strong></p>
+      <p class="muted">or click to choose a file</p>
+      <input type="file" id="file-input" accept=".docx" hidden>
+    </div>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="results" hidden>
+    <div id="stats" class="stats"></div>
+    <div id="warnings"></div>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="questions" role="tab">Questions</button>
+      <button class="tab" data-view="blocks" role="tab">Blocks</button>
+      <button class="tab" data-view="json" role="tab">JSON</button>
+    </nav>
+
+    <div id="view-questions" class="view"></div>
+    <div id="view-blocks" class="view" hidden></div>
+    <div id="view-json" class="view" hidden><pre id="json-output"></pre></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

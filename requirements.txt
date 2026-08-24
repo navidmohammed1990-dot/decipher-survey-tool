@@ -1,0 +1,10 @@
+# Phase 1 — DOCX parsing + local web scaffold
+python-docx>=1.1.2
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+python-multipart>=0.0.12
+
+# Development / tests
+pytest>=8.3
+httpx>=0.27
