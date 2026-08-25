@@ -14,11 +14,13 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from app.classify.lines import SourceLine, question_lines
+from app.classify.corrections import correction_memory
+from app.classify.lines import SourceLine, marker_code, question_lines
 from app.classify.ollama import OllamaClient, OllamaError
 from app.models.document import ParsedDocument, TextRun
 from app.generate.resources import DEFAULT_SUBJECT_TYPE, SUBJECT_TYPES, resource_tag_for
 from app.models.survey import (
+    ClassificationTrace,
     GRID_ELEMENTS,
     OPTION_ELEMENTS,
     SUPPORTED_ELEMENTS,
@@ -30,23 +32,65 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_THRESHOLD = 0.75
 
+#: Every line-role key the model may return.
+ROLE_KEYS = (
+    "title_lines",
+    "comment_lines",
+    "option_lines",
+    "routing_lines",
+    "type_signal_lines",
+    "row_lines",
+    "col_lines",
+)
+
+#: Which element a house type marker implies, when options are present.
+TYPE_TAG_ELEMENTS = {
+    "SC": {"radio", "select"},
+    "MC": {"checkbox"},
+    "OE": {"textarea", "text"},
+    "NUM": {"number"},
+    "GRID": {"radio_grid", "checkbox_grid"},
+}
+
 FALLBACK_NOTE = "AI classification unavailable - please verify."
 
 SYSTEM_PROMPT = """\
-Classify ONE questionnaire question. Element must be one of: radio, checkbox,
-radio_grid, checkbox_grid, textarea, text, number, select, html.
-Identify which given line indices are the title, the comment/instruction,
-the options, and (grids only) the rows and columns. Use ONLY given indices -
-never invent or rewrite text.
+You are a survey programmer's assistant, classifying every line of ONE
+questionnaire question. For each line you're given the raw text plus some
+factual hints detected about its formatting - use these as evidence, the
+way an experienced programmer would notice formatting cues, but make the
+actual judgment call yourself. Hints are not rules - a line can be red
+without being an instruction, or plain text and still be an instruction.
+Decide based on what the line actually says and how it's formatted together.
+
+Classify each line's role:
+- title: the question being asked
+- comment: an instruction to the respondent (e.g. "select all that apply")
+- option: a response option the respondent could select
+- routing: a note to the programmer (skip logic, quotas, termination,
+  randomization instructions) - never shown to respondents, never an option
+- type_signal: an explicit type marker like "ASK ALL, SC"
+
+A type marker or "ASK ..." header that appears AFTER this question's options
+usually introduces the NEXT question - classify it as routing and do not use
+it as this question's type signal.
+
+Then decide the element type: radio, checkbox, radio_grid, checkbox_grid,
+textarea, text, number, select, html. Use the type_signal if one exists and
+options are present (SC->radio, MC->checkbox) unless the options clearly
+form a grid (row statements x column scale). If no options exist, ignore
+any type_signal and classify from the question's wording instead.
+
 For grids only, also say what the ROWS describe with subject_type: one of
-brand, category, product, statement, none. Rows naming companies or labels a
-shopper would recognise are "brand"; rows naming product types are "product";
-rows naming market sectors are "category"; rows that are opinions or
-attitudes are "statement". Use "statement" if unclear.
-Respond with ONLY JSON:
+brand, category, product, statement, none. Use "statement" if unclear.
+
+Never invent or rewrite text - only classify given lines by index.
+
+Respond with ONLY this JSON:
 {"element": "checkbox", "title_lines": [0], "comment_lines": [1],
- "option_lines": [2,3,4], "row_lines": [], "col_lines": [],
- "subject_type": "none", "confidence": 0.9, "notes": "brief reason"}"""
+ "option_lines": [2,3,4], "routing_lines": [5], "type_signal_lines": [],
+ "row_lines": [], "col_lines": [], "subject_type": "none",
+ "confidence": 0.9, "notes": "brief reasoning, including how you used any hints"}"""
 
 
 class ClassificationOutcome(BaseModel):
@@ -96,9 +140,19 @@ def _runs_for(indices: list[int], by_index: dict[int, SourceLine]) -> list[TextR
 
 
 def _options_for(indices: list[int], by_index: dict[int, SourceLine]) -> list[OptionLine]:
-    return [
-        OptionLine.from_runs(by_index[index].runs, by_index[index].text) for index in indices
-    ]
+    """Build options, preserving whatever code the source gave each one.
+
+    A code can arrive trailing ("Other | 97") or as a typed leading number
+    ("97. Other"). Both are the author's choice and outrank renumbering.
+    """
+    options: list[OptionLine] = []
+    for index in indices:
+        line = by_index[index]
+        option = OptionLine.from_runs(line.runs, line.text)
+        if option.code is None:
+            option.code = marker_code(line.literal_marker)
+        options.append(option)
+    return options
 
 
 def _coerce_confidence(value) -> float:
@@ -140,7 +194,7 @@ def interpret_response(
 
     warnings: list[str] = []
     picks = {}
-    for key in ("title_lines", "comment_lines", "option_lines", "row_lines", "col_lines"):
+    for key in ROLE_KEYS:
         picks[key], key_warnings = _index_list(payload, key, valid)
         warnings.extend(key_warnings)
 
@@ -150,7 +204,14 @@ def interpret_response(
 
     confidence = _coerce_confidence(payload.get("confidence"))
     notes = payload.get("notes")
+    notes_text = notes.strip() if isinstance(notes, str) else ""
     subject_type = _coerce_subject_type(payload.get("subject_type"), element)
+
+    # Programmer-facing lines are never respondent content and never reach XML.
+    routing_notes = [
+        by_index[index].text
+        for index in picks["routing_lines"] + picks["type_signal_lines"]
+    ]
     question = Question(
         label=label,
         element=element,
@@ -162,15 +223,94 @@ def interpret_response(
         rows=_options_for(picks["row_lines"], by_index),
         cols=_options_for(picks["col_lines"], by_index),
         confidence=confidence,
-        ai_notes=notes.strip() if isinstance(notes, str) else "",
+        ai_notes=notes_text,
+        routing_notes=routing_notes,
+        trace=ClassificationTrace(
+            lines=[line.text for line in lines],
+            ai_payload={key: payload.get(key) for key in ("element", *ROLE_KEYS, "subject_type")},
+        ),
     )
 
     warnings.extend(_structural_warnings(question))
+    warnings.extend(disagreements(question, payload, lines, picks, notes_text))
     question.needs_review = confidence < threshold or bool(warnings)
     if warnings:
         question.ai_notes = " ".join(filter(None, [question.ai_notes, *warnings]))
 
     return ClassificationOutcome(question=question, warnings=warnings)
+
+
+
+def disagreements(
+    question: Question,
+    payload: dict,
+    lines: list[SourceLine],
+    picks: dict[str, list[int]],
+    notes: str,
+) -> list[str]:
+    """Where strong pattern evidence contradicts the model, say so.
+
+    This is a safety net, not a gate: nothing is auto-corrected, because
+    picking a side silently is exactly what puts a wrong answer into a survey.
+    The question is flagged and the programmer decides.
+    """
+    by_index = {line.index: line for line in lines}
+    found: list[str] = []
+
+    for index in picks["option_lines"] + picks["row_lines"] + picks["col_lines"]:
+        line = by_index[index]
+        if line.features.matches_routing_keyword:
+            found.append(
+                f"Line {index} ({line.text[:60]!r}) looks like routing text by keyword "
+                f"but the model classified it as an option - please check."
+            )
+
+    # The reverse: a line the hints say nothing about, called routing with no
+    # reasoning offered. If the model explained itself, trust its judgment —
+    # house conventions the hints do not cover are exactly what it is for.
+    if not notes:
+        for index in picks["routing_lines"]:
+            line = by_index[index]
+            features = line.features
+            if not (features.matches_routing_keyword or features.matches_type_tag_pattern
+                    or features.is_colored):
+                found.append(
+                    f"Line {index} ({line.text[:60]!r}) was classified as routing but "
+                    f"carries no routing hint and the model gave no reasoning - please check."
+                )
+
+    found.extend(_type_tag_disagreement(question, lines, picks))
+    return found
+
+
+def _type_tag_disagreement(
+    question: Question, lines: list[SourceLine], picks: dict[str, list[int]]
+) -> list[str]:
+    """Flag an element that contradicts an explicit SC/MC/OE marker."""
+    if question.element in GRID_ELEMENTS:
+        # The prompt allows a grid to override the marker.
+        return []
+    if not (question.options or question.rows):
+        # With no options the marker says nothing about the element.
+        return []
+
+    content = picks["option_lines"] + picks["row_lines"]
+    first_content = min(content) if content else None
+
+    for line in lines:
+        tag = line.features.type_tag_value
+        if not tag or tag not in TYPE_TAG_ELEMENTS:
+            continue
+        if first_content is not None and line.index > first_content:
+            # A marker after the options belongs to the next question.
+            continue
+        expected = TYPE_TAG_ELEMENTS[tag]
+        if question.element not in expected:
+            return [
+                f"Line {line.index} marks this question as '{tag}' but the model chose "
+                f"'{question.element}' (expected {' or '.join(sorted(expected))}) - please check."
+            ]
+    return []
 
 
 def _structural_warnings(question: Question) -> list[str]:
@@ -207,6 +347,7 @@ def fallback_question(label: str, lines: list[SourceLine]) -> Question:
         confidence=0.0,
         needs_review=True,
         ai_notes=FALLBACK_NOTE,
+        trace=ClassificationTrace(lines=[line.text for line in lines]),
     )
 
 
@@ -231,7 +372,8 @@ def classify_question(
         )
 
     try:
-        payload = client.generate_json(SYSTEM_PROMPT, build_prompt(label, lines))
+        system = correction_memory.prompt_prefix() + SYSTEM_PROMPT
+        payload = client.generate_json(system, build_prompt(label, lines))
         return interpret_response(payload, label, lines, threshold)
     except (OllamaError, ValueError) as exc:
         logger.warning("Falling back to heuristic for %s: %s", label, exc)

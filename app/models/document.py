@@ -24,9 +24,16 @@ class TextRun(BaseModel):
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    color: str | None = None
+    """Font colour as an uppercase hex string, e.g. ``FF0000``.
 
-    def formatting_key(self) -> tuple[bool, bool, bool]:
-        return (self.bold, self.italic, self.underline)
+    ``None`` means the run uses the document's default colour. Questionnaires
+    often mark programmer-only text in a colour, so this is worth preserving
+    even though it never reaches the generated XML.
+    """
+
+    def formatting_key(self) -> tuple[bool, bool, bool, str | None]:
+        return (self.bold, self.italic, self.underline, self.color)
 
 
 class ListInfo(BaseModel):

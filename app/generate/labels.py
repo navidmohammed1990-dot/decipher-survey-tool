@@ -45,10 +45,21 @@ class LabelledLine:
     attrs: dict[str, str]
 
 
-def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]:
-    """Assign ``r1``, ``r2``, … with the r91/r99 exceptions.
+def _explicit_code(option: OptionLine) -> int | None:
+    """A source-provided code, if the option carries a usable one."""
+    if not option.code:
+        return None
+    try:
+        return int(option.code)
+    except (TypeError, ValueError):
+        return None
 
-    The sequential counter only advances for ordinary rows, so
+
+def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]:
+    """Assign row labels, preferring codes the source document supplied.
+
+    Precedence is explicit code, then the r91/r99 convention, then sequential.
+    The sequential counter only advances for rows that fall through to it, so
     ``[A, Other specify, B]`` produces ``r1, r91, r2``.
     """
     is_checkbox = element in {"checkbox", "checkbox_grid"}
@@ -59,15 +70,27 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
         text = option.raw_text
         attrs: dict[str, str] = {}
 
+        # Attributes follow what the option *says*, independently of where its
+        # number came from: an explicitly coded "Other (97), please specify"
+        # still needs its text box.
         if is_other_specify(text):
-            suffix = OTHER_LABEL_SUFFIX
             attrs.update(OPEN_ATTRS)
         elif is_none_of_the_above(text):
-            suffix = NONE_LABEL_SUFFIX
             attrs["randomize"] = "0"
             if is_checkbox:
                 # Radio needs no exclusive: only one answer is possible anyway.
                 attrs["exclusive"] = "1"
+
+        # Numbering precedence: a code the source gave, then the r91/r99
+        # convention, then sequential. A source that codes Other as 97 means it;
+        # renumbering it to 3 would break the data tables downstream.
+        explicit = _explicit_code(option)
+        if explicit is not None:
+            suffix = explicit
+        elif is_other_specify(text):
+            suffix = OTHER_LABEL_SUFFIX
+        elif is_none_of_the_above(text):
+            suffix = NONE_LABEL_SUFFIX
         else:
             counter += 1
             suffix = counter
@@ -86,9 +109,16 @@ def label_cols(options: list[OptionLine]) -> list[LabelledLine]:
     numbering convention — that is rows only.
     """
     labelled: list[LabelledLine] = []
-    for position, option in enumerate(options, start=1):
+    counter = 0
+    for option in options:
         attrs = dict(OPEN_ATTRS) if is_other_specify(option.raw_text) else {}
+        explicit = _explicit_code(option)
+        if explicit is not None:
+            suffix = explicit
+        else:
+            counter += 1
+            suffix = counter
         labelled.append(
-            LabelledLine(option=option, label=f"c{position}", suffix=position, attrs=attrs)
+            LabelledLine(option=option, label=f"c{suffix}", suffix=suffix, attrs=attrs)
         )
     return labelled

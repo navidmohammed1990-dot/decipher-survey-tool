@@ -375,6 +375,7 @@ function questionCard(question) {
   card.querySelector(".label-pill").textContent = question.label;
   card.querySelector(".qc-title").textContent = runsText(question.title) || "(no title)";
   card.querySelector(".ai-notes").textContent = question.ai_notes || "";
+  renderRoutingNotes(card, question);
 
   const badge = card.querySelector(".confidence");
   const percent = Math.round((question.confidence || 0) * 100);
@@ -410,6 +411,16 @@ function questionCard(question) {
   card.querySelector(".save").addEventListener("click", () => saveCard(card));
   card.querySelector(".preview").addEventListener("click", () => previewCard(card));
   return node;
+}
+
+/** Routing text is shown for context and never reaches the generated XML. */
+function renderRoutingNotes(card, question) {
+  const notes = question.routing_notes || [];
+  const container = card.querySelector(".routing-notes");
+  container.hidden = notes.length === 0;
+  container.querySelector(".routing-list").replaceChildren(
+    ...notes.map((text) => el("li", null, text))
+  );
 }
 
 function openCard(body, toggle, open) {
@@ -528,6 +539,7 @@ async function saveCard(card) {
     badge.className = `confidence ${updated.needs_review ? "flag" : "good"}`;
     badge.textContent = `${updated.needs_review ? "🔴" : "🟢"} ${Math.round((updated.confidence || 0) * 100)}%`;
     card.querySelector(".qc-title").textContent = runsText(updated.title) || "(no title)";
+    renderRoutingNotes(card, updated);
   } catch (error) {
     state.className = "save-state err";
     state.textContent = error.message;

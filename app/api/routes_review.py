@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app.classify.corrections import Correction, correction_memory
 from app.generate.resources import (
     SUBJECT_TYPES,
     resource_catalog,
@@ -95,8 +96,13 @@ class QuestionPatch(BaseModel):
 
 
 def _lines_to_options(text: str) -> list[OptionLine]:
+    """One option per line, splitting off any source-provided code.
+
+    A programmer who types "Other | 97" means 97, the same as if the document
+    had supplied it.
+    """
     return [
-        OptionLine(raw_text=line.strip())
+        OptionLine.from_text(line.strip())
         for line in text.splitlines()
         if line.strip()
     ]
@@ -179,13 +185,49 @@ def patch_question(label: str, patch: QuestionPatch) -> Question:
     updated = draft_store.update_question(label, apply_patch(question, patch))
     if updated is None:  # pragma: no cover - lost a race with a clear()
         raise HTTPException(status_code=404, detail=f"No question labelled '{label}'.")
+
+    _remember_correction(question, updated)
     return updated
+
+
+def _remember_correction(before: Question, after: Question) -> None:
+    """Feed a programmer's fix back into later classifications this session.
+
+    A questionnaire follows one house's conventions throughout, so the first
+    correction is the best available evidence for how to read the rest of it.
+    """
+    if before.trace is None or not before.trace.ai_payload:
+        return
+
+    correction_memory.record(
+        Correction(
+            label=after.label,
+            original_lines=before.trace.lines,
+            ai_said=before.trace.ai_payload,
+            sp_corrected_to={
+                "element": after.element,
+                "option_lines": [o.raw_text for o in after.options],
+                "routing_lines": list(after.routing_notes),
+                "subject_type": after.subject_type,
+            },
+        )
+    )
 
 
 @router.delete("/questions", status_code=204)
 def clear_draft() -> None:
     """Discard the current draft."""
     draft_store.clear()
+
+
+@router.get("/corrections", tags=["meta"])
+def list_corrections() -> dict:
+    """Corrections carried into later classifications for this document."""
+    corrections = correction_memory.recent()
+    return {
+        "count": len(corrections),
+        "corrections": [c.model_dump() for c in corrections],
+    }
 
 
 @router.get("/resources", tags=["meta"])

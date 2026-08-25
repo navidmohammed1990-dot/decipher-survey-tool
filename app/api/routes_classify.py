@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.classify.classifier import classify_document
+from app.classify.corrections import correction_memory
 from app.classify.jobs import job_manager
 from app.classify.ollama import OllamaClient
 from app.config import settings
@@ -56,6 +57,7 @@ def classify(
     the event loop for the length of a whole questionnaire.
     """
     review_threshold = settings.review_threshold if threshold is None else threshold
+    correction_memory.use_document(document.source_filename)
     outcomes = classify_document(document, build_client(), review_threshold)
 
     questions = [outcome.question for outcome in outcomes]
@@ -153,6 +155,7 @@ def start_classification(request: StartJobRequest) -> StartJobResponse:
     # Register the document first so results merge into one working set, and so
     # a later batch needs no re-upload.
     draft_store.set_document(request.document)
+    correction_memory.use_document(request.document.source_filename)
     draft = draft_store.get()
     draft.review_threshold = threshold
     draft_store.replace(draft)

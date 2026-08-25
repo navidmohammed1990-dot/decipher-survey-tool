@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-5 complete — parse -> classify -> review -> export.**
+**Status: Phases 1-7 complete — parse -> classify -> review -> export.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -316,6 +316,107 @@ rather than merging into the previous one.
 
 ---
 
+## Phases 6-7 — AI-led line classification
+
+### The principle
+
+Working out what a line of text *means* — question title, respondent
+instruction, answer option, or note to the programmer — is a meaning-level task,
+and that is what judgment is for. Deterministic code owns everything downstream:
+once the classifier says "these lines are options", turning them into correctly
+numbered and coded `<row>` tags never needs judgment again.
+
+An earlier draft had this backwards, letting pattern matching *decide* a line's
+role before the model saw it. Patterns are only ever as good as the one
+questionnaire they were written against — the next document may colour routing
+text differently, use brackets instead of caps, or follow a house convention
+nobody has seen. So patterns observe; the classifier decides.
+
+```
+Raw lines (Phase 1 parser)
+   -> Feature extraction   factual hints only, no roles assigned
+   -> AI classifier        judges every line, weighing hints as evidence
+   -> Disagreement check   flags conflicts, never picks a side
+   -> Generator            structure only, unchanged
+```
+
+### Features are observations
+
+`app/classify/features.py` attaches `has_leading_enumeration`, `is_table_row`,
+`is_bold`, `is_colored`, `color_hint`, `trailing_numeric_code`,
+`matches_routing_keyword`, `matches_type_tag_pattern` and `type_tag_value`. No
+field names a role, and nothing is filtered, excluded or pre-sorted. A line with
+the strongest possible hints still reaches the model exactly as an unhinted one
+does — only its evidence differs.
+
+Lines are presented as the brief specifies:
+
+```
+0: "Which of the following best describes your gender identity?"  [hints: none]
+2: "Male | 1"  [hints: is_table_row=true, trailing_numeric_code=1]
+5: "RANDOMLY ASSIGN OTHER INTO MALE/FEMALE QUOTAS"  [hints: color_hint=red, matches_routing_keyword=true]
+```
+
+### Roles and routing notes
+
+Every line gets a role: title, comment, option, routing, or type_signal. Routing
+and type-signal lines land in `Question.routing_notes` — shown in the review
+screen for context, never in title/comment/options/rows/cols, and never emitted.
+Routing and quota logic stays the programmer's job.
+
+### Disagreement safety net
+
+Where strong pattern evidence contradicts the model, neither side wins silently:
+
+| Conflict | Result |
+|---|---|
+| A routing-keyword line classified as an option | `needs_review` + a note naming the line |
+| A hint-less line called routing with no reasoning given | `needs_review` + a note |
+| An element contradicting an explicit `SC`/`MC`/`OE` marker | `needs_review` + a note |
+
+Nothing is auto-corrected. The exceptions the prompt allows — a grid outranking
+`SC`/`MC`, and a marker being irrelevant when there are no options — do not
+fire. A marker appearing *after* the options is treated as the next question's
+header, not this one's.
+
+Judgment the patterns cannot corroborate is not penalised: a hint-less routing
+line is accepted when the model explains its reasoning, which is exactly the
+case that proves the pipeline is not living off pattern coverage.
+
+### Learning from corrections, within one document
+
+A questionnaire follows one house's conventions throughout, so the first fix the
+programmer makes is the best evidence for how to read the rest. Corrections are
+captured on edit, and the most recent three are prepended to the system prompt
+as few-shot examples for later questions **in the same session**. Local only:
+no fine-tuning, no external calls, nothing persisted, and memory is cleared
+between documents so one client's conventions never leak into another's.
+
+`GET /api/corrections` shows what is currently being carried.
+
+### Bugs fixed alongside
+
+- **Table rows split across lines.** Each cell was becoming its own line, so
+  `Male | 1` / `Female | 2` / `Other | 97` came out as `r1="1"`, `r2="Female"`,
+  `r3="Other"` — the first option's text lost and everything shifted. One table
+  row is now one joined line. Grids still work: a table whose body rows are
+  sparser than its header offers its header cells separately as columns.
+- **Headers bleeding backwards.** `ASK ALL, SC` sits *above* its own question's
+  label, so segmentation left it at the tail of the previous question, where it
+  was eligible to become an option. Trailing header lines now move onto the
+  question they introduce. Post-question routing (`QUALIFY IF ...`) stays put.
+- **Source codes overwritten.** Row numbering now prefers a code the source
+  supplied, then the r91/r99 convention, then sequential. A code can arrive
+  trailing (`Other | 97`, `Other (97)`) or as a typed leading number
+  (`97. Other`) — both are the author's choice. Word's *auto*-numbering is not
+  treated as a code, since that is only how the list renders. Open-text and
+  exclusive attributes still follow the option's wording, so an explicitly coded
+  `Other (97), please specify` keeps its text box.
+- **`number` had radio wording.** It now maps to `Open` rather than `SR`.
+
+
+---
+
 ## Project layout
 
 ```
@@ -348,12 +449,14 @@ app/
     xml_generator.py            Element spec table and rendering
     export.py                   Survey-root wrapping, well-formedness
   classify/
+    features.py                 Factual line hints (no roles assigned)
+    corrections.py              Session-level learning from SP edits
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
   static/                       Review UI (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          313 tests
+tests/                          394 tests
 ```
 
 ## Configuration
@@ -421,9 +524,10 @@ These are honest boundaries of Phase 1, not defects:
 | 3     | Deterministic XML generation                 | ✅ done |
 | 4     | Programmer review and override UI            | ✅ done |
 | 5     | Resource tags, progress and batching         | ✅ done |
-| 6     | Basic logic detection                        | next   |
-| 7     | Validation and QA reporting                  |        |
-| 8     | Pilot on real questionnaires                 |        |
+| 6     | Bug fixes from the first real questionnaire   | ✅ done |
+| 7     | AI-led line classification                   | ✅ done |
+| 8     | Validation and QA reporting                  | next   |
+| 9     | Pilot on real questionnaires                 |        |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.

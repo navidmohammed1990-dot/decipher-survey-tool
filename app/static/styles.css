@@ -279,3 +279,24 @@ input[type="text"] {
 #progress-detail { margin: 0; }
 
 .resource-select, .subject-select { width: 100%; margin-top: 4px; }
+
+
+/* -- routing notes: programmer-facing context, never exported ----------- */
+
+.routing-notes {
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn-border);
+  background: var(--warn-bg);
+  border-radius: 0 6px 6px 0;
+}
+.routing-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.routing-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.routing-list li { margin: 2px 0; }

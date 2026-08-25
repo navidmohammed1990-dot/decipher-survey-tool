@@ -52,7 +52,7 @@ def scripted_ai(monkeypatch):
         "Q5": {"element": "checkbox", "title_lines": [0], "comment_lines": [1],
                "option_lines": [2, 3, 4, 5], "confidence": 0.94, "notes": "select all"},
         "Q6": {"element": "radio_grid", "title_lines": [0], "comment_lines": [1],
-               "row_lines": [4, 5], "col_lines": [2, 3], "confidence": 0.91, "notes": "grid"},
+               "row_lines": [5, 6], "col_lines": [3, 4], "confidence": 0.91, "notes": "grid"},
         "Q7": {"element": "textarea", "title_lines": [0],
                "confidence": 0.6, "notes": "open ended, unsure"},
     }

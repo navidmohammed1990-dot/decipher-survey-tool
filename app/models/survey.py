@@ -19,6 +19,7 @@ __all__ = [
     "SubjectType",
     "TextRun",
     "OptionLine",
+    "ClassificationTrace",
     "Question",
     "QuestionDraft",
 ]
@@ -59,15 +60,37 @@ class OptionLine(BaseModel):
     raw_text: str
     bold: bool = False
     italic: bool = False
+    code: str | None = None
+    """A value the source document gave this option, e.g. the 97 in ``Other | 97``.
+
+    Preserved verbatim rather than renumbered: 97 for Other and 99 for None are
+    a house convention that carries meaning into the data tables.
+    """
 
     @classmethod
     def from_runs(cls, runs: list[TextRun], text: str | None = None) -> OptionLine:
+        from app.classify.features import detect_trailing_code, strip_trailing_code
+
         meaningful = [run for run in runs if run.text.strip()]
+        source = text if text is not None else "".join(r.text for r in runs).strip()
         return cls(
-            raw_text=text if text is not None else "".join(r.text for r in runs).strip(),
+            raw_text=strip_trailing_code(source),
+            code=detect_trailing_code(source),
             bold=bool(meaningful) and all(run.bold for run in meaningful),
             italic=bool(meaningful) and all(run.italic for run in meaningful),
         )
+
+    @classmethod
+    def from_text(cls, text: str) -> OptionLine:
+        """Build from a plain line, splitting off any source-provided code."""
+        return cls(raw_text=strip_code(text), code=code_of(text))
+
+
+class ClassificationTrace(BaseModel):
+    """The evidence behind one classification, kept for the correction loop."""
+
+    lines: list[str] = Field(default_factory=list)
+    ai_payload: dict = Field(default_factory=dict)
 
 
 class Question(BaseModel):
@@ -93,6 +116,14 @@ class Question(BaseModel):
     ai_notes: str = ""
     dev_notes: str = ""
     """Survey-programmer scratch notes. Never reaches the XML."""
+    routing_notes: list[str] = Field(default_factory=list)
+    """Programmer-facing lines: skip logic, quotas, terminations, type markers.
+
+    Shown in the review screen for context and never emitted — routing and quota
+    logic is the programmer's job, not something the tool guesses at.
+    """
+    trace: ClassificationTrace | None = None
+    """What the model was shown and what it answered, for correction learning."""
 
     def title_text(self) -> str:
         return "".join(run.text for run in self.title).strip()
@@ -131,3 +162,15 @@ class QuestionDraft(BaseModel):
             "confident": self.confident_count,
         }
         return payload
+
+
+def code_of(text: str) -> str | None:
+    from app.classify.features import detect_trailing_code
+
+    return detect_trailing_code(text)
+
+
+def strip_code(text: str) -> str:
+    from app.classify.features import strip_trailing_code
+
+    return strip_trailing_code(text)

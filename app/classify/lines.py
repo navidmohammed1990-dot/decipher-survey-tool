@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.classify.features import LineFeatures, extract_features
 from app.models.document import (
     Block,
     ParagraphBlock,
@@ -36,10 +37,19 @@ class SourceLine(BaseModel):
     block_index: int | None = None
     marker: str | None = None
     """A list marker stripped from the front of this line, if any."""
+    literal_marker: str | None = None
+    """The marker only when the author typed it, e.g. the ``97.`` in
+    ``97. Other, please specify``.
+
+    Distinct from a marker Word generated: a number the author typed is a code
+    they chose, while Word's auto-numbering is only how the list renders.
+    """
+    features: LineFeatures = Field(default_factory=LineFeatures)
+    """Factual observations offered to the classifier as evidence."""
 
     def prompt_form(self) -> str:
-        prefix = {"table_row": "[grid row] ", "table_col": "[grid column] "}.get(self.kind, "")
-        return f"{self.index}: {prefix}{self.text}"
+        """The line as the model sees it: raw text plus hints, no role attached."""
+        return f'{self.index}: "{self.text}"  [hints: {self.features.as_prompt_hints()}]'
 
 
 def _strip_marker(runs: list[TextRun]) -> tuple[list[TextRun], str | None]:
@@ -64,10 +74,19 @@ def question_lines(document: ParsedDocument, question: QuestionBoundary) -> list
     """
     lines: list[SourceLine] = []
 
-    def add(runs: list[TextRun], kind: LineKind, block_index: int | None, marker=None) -> None:
+    def add(
+        runs: list[TextRun],
+        kind: LineKind,
+        block_index: int | None,
+        marker=None,
+        source_text: str | None = None,
+        literal_marker: str | None = None,
+    ) -> None:
         text = collapse_whitespace(runs_to_text(runs))
         if not text:
             return
+        # Features are observed on the line as the source wrote it, so a
+        # stripped "1." still registers as has_leading_enumeration.
         lines.append(
             SourceLine(
                 index=len(lines),
@@ -76,6 +95,12 @@ def question_lines(document: ParsedDocument, question: QuestionBoundary) -> list
                 kind=kind,
                 block_index=block_index,
                 marker=marker,
+                literal_marker=literal_marker,
+                features=extract_features(
+                    source_text if source_text is not None else text,
+                    runs,
+                    is_table_row=kind in ("table_row", "table_col"),
+                ),
             )
         )
 
@@ -84,8 +109,16 @@ def question_lines(document: ParsedDocument, question: QuestionBoundary) -> list
             if block.index == question.title_block_index:
                 add(question.title_runs, "paragraph", block.index)
                 continue
+            original = collapse_whitespace(runs_to_text(block.runs))
             runs, marker = _strip_marker(block.runs)
-            add(runs, "paragraph", block.index, marker or (block.list_info.marker if block.list_info else None))
+            add(
+                runs,
+                "paragraph",
+                block.index,
+                marker or (block.list_info.marker if block.list_info else None),
+                source_text=original,
+                literal_marker=marker,
+            )
         elif isinstance(block, TableBlock):
             _add_table_lines(block, add)
 
@@ -93,24 +126,67 @@ def question_lines(document: ParsedDocument, question: QuestionBoundary) -> list
 
 
 def _add_table_lines(table: TableBlock, add) -> None:
-    """Offer a table as grid columns (header row) and grid rows (first column).
+    """Offer a table's rows as lines, one line per row.
 
-    This is the shape a Decipher grid takes: the header row names the scale
-    points, the first column names the statements.
+    An options table (``Male | 1``) and a grid (statements x scale) are the same
+    structure to the parser, and telling them apart is a meaning-level judgment
+    the classifier makes — not something to decide here. So every row becomes
+    one joined line, and the header cells of a grid-shaped table are offered
+    *additionally* as separate lines the classifier may take as columns.
+
+    Emitting cells individually for every table is what dropped the first
+    option's text and shifted the rest by one: ``Male | 1`` became a column "1"
+    and rows "Female", "Other".
     """
     if not table.rows:
         return
 
-    header, *body = table.rows
-    has_stub_column = table.n_cols > 1
+    header_is_separable = _has_sparse_body(table)
 
-    for cell in header.cells[1:] if has_stub_column else header.cells:
-        add(_cell_runs(cell), "table_col", None)
-
-    for row in body:
-        if not row.cells:
+    for position, row in enumerate(table.rows):
+        cells = [cell for cell in row.cells if cell.text.strip()]
+        if not cells:
             continue
-        add(_cell_runs(row.cells[0]), "table_row", None)
+
+        if position == 0 and header_is_separable:
+            # Grid shape: the header names the scale points, one per line.
+            for cell in cells:
+                add(_cell_runs(cell), "table_col", None)
+            continue
+
+        add(_joined_row_runs(cells), "table_row", None)
+
+
+def _has_sparse_body(table: TableBlock) -> bool:
+    """True when the table looks like a grid rather than an options list.
+
+    A grid's body rows leave the scale cells empty for the respondent to fill,
+    so they carry fewer filled cells than the header. An options table has
+    every cell filled on every row. This is a structural observation about the
+    table, not a decision about what any line means.
+    """
+    filled = [
+        sum(1 for cell in row.cells if cell.text.strip())
+        for row in table.rows
+    ]
+    if len(filled) < 2 or filled[0] < 2:
+        return False
+    return any(count < filled[0] for count in filled[1:])
+
+
+def _joined_row_runs(cells) -> list[TextRun]:
+    """One table row as one run list, cells separated by ``|``.
+
+    Keeping the separator visible lets the classifier see that ``Male`` and
+    ``1`` came from different cells, and lets the code extractor find the
+    trailing value.
+    """
+    runs: list[TextRun] = []
+    for position, cell in enumerate(cells):
+        if position:
+            runs.append(TextRun(text=" | "))
+        runs.extend(_cell_runs(cell))
+    return merge_runs(runs)
 
 
 def _cell_runs(cell) -> list[TextRun]:
@@ -130,3 +206,14 @@ def collect_blocks_text(blocks: list[Block]) -> str:
     return "\n".join(
         block.text for block in blocks if isinstance(block, ParagraphBlock) and block.text
     )
+
+
+def marker_code(marker: str | None) -> str | None:
+    """The numeric value of a typed list marker, e.g. ``97.`` -> ``97``.
+
+    Non-numeric markers (bullets, letters) carry no code.
+    """
+    if not marker:
+        return None
+    digits = marker.strip(" .)]}\t")
+    return digits if digits.isdigit() else None

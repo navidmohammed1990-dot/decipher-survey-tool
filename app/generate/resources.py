@@ -47,13 +47,16 @@ _FLAT_TAGS = {
     "select": "Ranking",
     # html takes no comment at all.
     "html": None,
-    # The catalog has no numeric snippet; see LITERAL_COMMENT_DEFAULTS.
-    "number": None,
+    # No dedicated numeric snippet exists in the template, so numeric entry
+    # shares the open-response wording. SR was plainly wrong: it is
+    # single-response radio wording on a free-entry field.
+    "number": "Open",
 }
 
-#: Comments with no resource tag in the catalog, kept as literal text.
-#: If the team adds e.g. <res label="Numeric">, move it into _FLAT_TAGS.
-LITERAL_COMMENT_DEFAULTS = {"number": "Please enter a whole number"}
+#: Comments with no resource tag in the catalog, kept as literal text. Empty
+#: now that number maps to Open; add entries here only for elements the
+#: template has no snippet for.
+LITERAL_COMMENT_DEFAULTS: dict[str, str] = {}
 
 
 def resource_tag_for(element: str, subject_type: str = "none") -> str | None:

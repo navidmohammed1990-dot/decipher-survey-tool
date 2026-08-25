@@ -99,6 +99,7 @@ def test_the_pattern_is_the_one_the_brief_specified():
         ("textarea", "none", "Open"),
         ("text", "none", "Open"),
         ("select", "none", "Ranking"),
+        ("number", "none", "Open"),
         ("radio_grid", "brand", "SRBrand"),
         ("radio_grid", "category", "SRCategory"),
         ("radio_grid", "product", "SRProduct"),
@@ -118,7 +119,7 @@ def test_the_mapping_table(element, subject_type, expected):
 
 def test_every_mapped_tag_exists_in_the_catalog():
     catalog = resource_catalog()
-    for element in ("radio", "checkbox", "textarea", "text", "select"):
+    for element in ("radio", "checkbox", "textarea", "text", "select", "number"):
         assert resource_tag_for(element) in catalog
     for element in ("radio_grid", "checkbox_grid"):
         for subject in ("brand", "category", "product", "statement", "none"):
@@ -152,11 +153,12 @@ def test_html_takes_no_comment():
     assert "<comment>" not in xml_text
 
 
-def test_number_keeps_its_literal_default():
-    """The catalog has no numeric snippet, so the literal text stands."""
+def test_number_uses_the_open_tag():
+    """Phase 6 Bug 4: SR is radio wording and does not fit a numeric field."""
     xml_text = generate_question(Question(label="Q1", element="number",
                                           title=[TextRun(text="Age")]))
-    assert "<comment>Please enter a whole number</comment>" in xml_text
+    assert "<comment>${res.Open}</comment>" in xml_text
+    assert "${res.SR}" not in xml_text
 
 
 def test_custom_text_overrides_the_tag():

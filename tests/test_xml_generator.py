@@ -223,8 +223,7 @@ def test_checkbox_rows_omit_value():
          "${res.Open}", "CheckBlank(2,Q1)"),
         ("text", [("optional", "0"), ("randomize", "0"), ("size", "25")],
          "${res.Open}", "CheckBlank(2,Q1)"),
-        ("number", [("size", "3"), ("optional", "0")],
-         "Please enter a whole number", None),
+        ("number", [("size", "3"), ("optional", "0")], "${res.Open}", None),
         ("select", [("optional", "0")], "${res.Ranking}", None),
     ],
 )

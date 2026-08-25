@@ -56,6 +56,19 @@ def _build_prefixed_pattern(config: BoundaryConfig) -> re.Pattern:
 #: Fallback for questionnaires that number questions without a letter prefix.
 NUMERIC_PATTERN = re.compile(r"^[ \t]*(?P<label>\d{1,3})(?P<sep>[.)][ \t]*)")
 
+#: A house-style header introducing the question that follows it, e.g.
+#: "ASK ALL, SC" or "[MC]". These sit *above* their question's label, so they
+#: land at the tail of the previous question unless reassigned.
+QUESTION_HEADER = re.compile(
+    r"""^[ \t]*[\[\(]?[ \t]*
+    (?:
+        ASK[ \t]+(?:ALL|IF|ONLY[ \t]+IF)\b
+      | (?:SC|MC|OE|NUM|GRID)[ \t]*[\],;:.\)]?[ \t]*$
+    )
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
 
 def normalize_label(raw: str) -> str:
     return re.sub(r"[ \t]+", "", raw).upper()
@@ -158,8 +171,45 @@ def detect_boundaries(
             )
         )
 
+    _reassign_trailing_headers(boundaries, by_index)
     warnings.extend(_duplicate_label_warnings(boundaries))
     return boundaries, warnings
+
+
+def _reassign_trailing_headers(boundaries: list[QuestionBoundary], by_index: dict) -> None:
+    """Move a trailing "ASK ALL, SC" header onto the question it introduces.
+
+    The header sits above its own question's label, so plain segmentation
+    leaves it at the tail of the *previous* question — which is how a type
+    marker for Q1.3 ended up eligible to become an option of Q1.2. This is a
+    question-boundary decision, not a decision about what the line means: the
+    classifier still judges its role.
+    """
+    for position in range(len(boundaries) - 1):
+        current, following = boundaries[position], boundaries[position + 1]
+
+        moved: list[int] = []
+        while len(current.block_indices) > 1:
+            index = current.block_indices[-1]
+            block = by_index.get(index)
+            if block is None or not isinstance(block, ParagraphBlock):
+                break
+            if not block.text.strip():
+                # An empty paragraph between the header and the next label.
+                current.block_indices.pop()
+                moved.insert(0, index)
+                continue
+            if not QUESTION_HEADER.match(block.text):
+                break
+            current.block_indices.pop()
+            moved.insert(0, index)
+
+        if not moved:
+            continue
+
+        following.block_indices[:0] = moved
+        current.end_index = current.block_indices[-1]
+        following.start_index = following.block_indices[0]
 
 
 def _preamble_segment(blocks: list[Block], stop: int) -> QuestionBoundary:

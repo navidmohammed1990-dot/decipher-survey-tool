@@ -74,7 +74,9 @@ def test_grid_tables_become_row_and_column_lines(q6_lines):
 
     cols = [line.text for line in q6_lines if line.kind == "table_col"]
     rows = [line.text for line in q6_lines if line.kind == "table_row"]
-    assert cols == ["Agree", "Disagree"]
+    # The stub header ("Statement") is offered as a candidate too; deciding it
+    # is not a scale point is the classifier's judgment, not the parser's.
+    assert cols == ["Statement", "Agree", "Disagree"]
     assert rows == ["The brand is good value", "The brand is easy to find"]
 
 
@@ -127,8 +129,8 @@ def test_grid_rows_and_cols_are_mapped(q6_lines):
             "element": "radio_grid",
             "title_lines": [0],
             "comment_lines": [1],
-            "row_lines": [4, 5],
-            "col_lines": [2, 3],
+            "row_lines": [5, 6],
+            "col_lines": [3, 4],
             "confidence": 0.9,
         },
         "Q6",

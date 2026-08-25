@@ -16,6 +16,9 @@ from app.models.document import TextRun
 #: Attributes of ``docx.text.run.Font`` we resolve, mapped to run element tags.
 _FORMAT_ATTRS = {"bold": "w:b", "italic": "w:i", "underline": "w:u"}
 
+#: Word writes "auto" when a run follows the document default colour.
+_AUTO_COLOR = "auto"
+
 #: Tracked deletions carry text that is not part of the current document.
 _SKIPPED_CONTAINERS = frozenset({qn("w:del")})
 
@@ -60,6 +63,48 @@ def _coerce_underline(value):
         return int(value) != 0
     except (TypeError, ValueError):
         return True
+
+
+def _style_chain_color(style) -> str | None:
+    seen: set[int] = set()
+    while style is not None and id(style) not in seen:
+        seen.add(id(style))
+        value = _color_of(getattr(style, "font", None))
+        if value is not None:
+            return value
+        style = style.base_style
+    return None
+
+
+def _color_of(font) -> str | None:
+    """Read a font's explicit RGB colour, if it has one.
+
+    ``ColorFormat.rgb`` raises for theme colours and returns ``None`` when
+    unset, so both are treated as "no explicit colour".
+    """
+    if font is None:
+        return None
+    try:
+        color = font.color
+        if color is None or color.rgb is None:
+            return None
+        return str(color.rgb).upper()
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def resolve_run_color(run, paragraph) -> str | None:
+    """Resolve a run's colour through the same inheritance chain as bold."""
+    for candidate in (run.font, None):
+        if candidate is not None:
+            value = _color_of(candidate)
+            if value is not None:
+                return value
+    for style in (run.style, paragraph.style):
+        value = _style_chain_color(style)
+        if value is not None:
+            return value
+    return None
 
 
 def document_defaults(document) -> dict[str, bool]:
@@ -143,7 +188,7 @@ def extract_runs(paragraph, defaults: dict[str, bool] | None = None) -> list[Tex
         if not text:
             continue
         fmt = resolve_run_format(run, paragraph, defaults)
-        runs.append(TextRun(text=text, **fmt))
+        runs.append(TextRun(text=text, color=resolve_run_color(run, paragraph), **fmt))
     return merge_runs(runs)
 
 
