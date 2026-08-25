@@ -15,6 +15,7 @@ let draft = { questions: [], summary: {}, review_threshold: 0.75 };
 let parsedDocument = null;
 let activeJobId = null;
 let pollTimer = null;
+let lastAiDetail = "";
 let resourceCatalog = [];
 let subjectTypes = [];
 
@@ -196,6 +197,8 @@ async function startClassification() {
       })
     );
     activeJobId = job.job_id;
+    lastAiDetail = job.ai_available ? "" : job.ai_detail || "";
+    renderWarnings("parse-warnings", lastAiDetail ? [lastAiDetail] : []);
     showProgress(0, job.total, null);
     $("progress-panel").hidden = false;
     setStatus("");
@@ -263,7 +266,10 @@ async function finishJob(status) {
   const fell = status.fallback_count
     ? ` ${status.fallback_count} used the offline fallback and need review.`
     : "";
-  setStatus(done + fell);
+  setStatus(done + fell, Boolean(status.fallback_count));
+  if (status.fallback_count && lastAiDetail) {
+    renderWarnings("review-warnings", [lastAiDetail]);
+  }
 }
 
 function showProgress(completed, total, remainingSeconds) {
@@ -617,8 +623,18 @@ function el(tag, className, text) {
   const badge = $("ai-status");
   try {
     const body = await (await fetch("/api/ai-status")).json();
-    badge.textContent = body.available ? `AI ready · ${body.model}` : "AI offline · fallback mode";
+    badge.textContent = body.available
+      ? `AI ready · ${body.model}`
+      : body.reachable
+        ? `AI model missing · ${body.model}`
+        : "AI offline · fallback mode";
     badge.classList.add(body.available ? "up" : "down");
+    // The detail names the actual cause — a missing model looks identical to a
+    // working setup until the first classify call fails.
+    badge.title = body.detail || "";
+    if (!body.available && body.detail) {
+      renderWarnings("parse-warnings", [body.detail]);
+    }
   } catch {
     badge.textContent = "AI status unknown";
     badge.classList.add("down");

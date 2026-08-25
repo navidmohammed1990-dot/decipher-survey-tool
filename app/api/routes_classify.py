@@ -27,6 +27,8 @@ class ClassifyResponse(BaseModel):
     review_threshold: float
     ai_available: bool
     """False when every question fell back to the heuristic."""
+    ai_detail: str = ""
+    """Why the AI is or is not usable, in words a person can act on."""
     fallback_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     summary: dict = Field(default_factory=dict)
@@ -58,7 +60,12 @@ def classify(
     """
     review_threshold = settings.review_threshold if threshold is None else threshold
     correction_memory.use_document(document.source_filename)
-    outcomes = classify_document(document, build_client(), review_threshold)
+
+    client = build_client()
+    # Checked once up front: without this every question fails identically and
+    # the real cause is buried under N copies of the fallback note.
+    ai_status = client.status()
+    outcomes = classify_document(document, client, review_threshold)
 
     questions = [outcome.question for outcome in outcomes]
     fallback_count = sum(1 for outcome in outcomes if outcome.used_fallback)
@@ -66,8 +73,11 @@ def classify(
     warnings: list[str] = []
     if outcomes and fallback_count == len(outcomes):
         warnings.append(
-            "The local AI was unreachable or returned unusable output for every "
-            "question. All questions use the conservative fallback and need review."
+            f"{ai_status['detail']} Every question used the conservative fallback "
+            f"and needs review."
+            if not ai_status["available"]
+            else "The local AI returned unusable output for every question. "
+                 "All questions use the conservative fallback and need review."
         )
     elif fallback_count:
         warnings.append(f"{fallback_count} question(s) fell back to the heuristic.")
@@ -83,6 +93,7 @@ def classify(
         source_filename=document.source_filename,
         review_threshold=review_threshold,
         ai_available=bool(outcomes) and fallback_count < len(outcomes),
+        ai_detail=ai_status["detail"],
         fallback_count=fallback_count,
         warnings=warnings,
         summary={
@@ -95,13 +106,13 @@ def classify(
 
 @router.get("/ai-status", tags=["meta"])
 def ai_status() -> dict:
-    """Whether the local model is reachable, for the UI to surface up front."""
-    client = build_client()
-    return {
-        "available": client.is_available(),
-        "url": client.base_url,
-        "model": client.model,
-    }
+    """Whether the local model is usable, for the UI to surface up front.
+
+    Reports the installed models too: "reachable" is not the same as "ready",
+    and a runtime that answers while lacking the configured model is exactly
+    the case that looks healthy and fails on every call.
+    """
+    return build_client().status()
 
 
 # -- batched, backgrounded classification ---------------------------------
@@ -119,6 +130,8 @@ class StartJobResponse(BaseModel):
     total: int
     labels: list[str]
     slow_warning_seconds: float
+    ai_available: bool = True
+    ai_detail: str = ""
 
 
 def _available_labels(document: ParsedDocument) -> list[str]:
@@ -160,10 +173,13 @@ def start_classification(request: StartJobRequest) -> StartJobResponse:
     draft.review_threshold = threshold
     draft_store.replace(draft)
 
+    client = build_client()
+    ai_status = client.status()
+
     job = job_manager.start(
         document=request.document,
         labels=labels,
-        client=build_client(),
+        client=client,
         threshold=threshold,
         # Merge as each question lands, so cancelling keeps completed work.
         on_batch=draft_store.merge_questions,
@@ -173,6 +189,8 @@ def start_classification(request: StartJobRequest) -> StartJobResponse:
         total=job.total,
         labels=labels,
         slow_warning_seconds=settings.slow_classify_seconds,
+        ai_available=ai_status["available"],
+        ai_detail=ai_status["detail"],
     )
 
 

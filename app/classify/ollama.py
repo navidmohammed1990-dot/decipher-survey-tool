@@ -19,6 +19,20 @@ class OllamaError(RuntimeError):
     """Raised for any failure to obtain usable JSON from the model."""
 
 
+class OllamaModelMissing(OllamaError):
+    """The runtime is reachable but the configured model is not installed."""
+
+
+def _tag_key(name: str) -> str:
+    """Normalise a model name for comparison.
+
+    Ollama resolves a bare name to its ``:latest`` tag, so a configured
+    ``llama3`` and an installed ``llama3:latest`` are the same model.
+    """
+    name = name.strip()
+    return name[: -len(":latest")] if name.endswith(":latest") else name
+
+
 class OllamaClient:
     """Calls ``/api/generate`` and returns the parsed JSON response."""
 
@@ -52,10 +66,14 @@ class OllamaClient:
             response = httpx.post(
                 f"{self.base_url}/api/generate", json=payload, timeout=self.timeout
             )
-            response.raise_for_status()
-            body = response.json()
         except httpx.HTTPError as exc:
-            raise OllamaError(f"Ollama request failed: {exc}") from exc
+            raise OllamaError(f"Could not reach Ollama at {self.base_url}: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise self._error_for(response)
+
+        try:
+            body = response.json()
         except json.JSONDecodeError as exc:
             raise OllamaError("Ollama returned a non-JSON envelope.") from exc
 
@@ -72,9 +90,95 @@ class OllamaClient:
             raise OllamaError(f"Expected a JSON object, got {type(parsed).__name__}.")
         return parsed
 
-    def is_available(self) -> bool:
+    def _error_for(self, response) -> OllamaError:
+        """Turn an HTTP error into one that says what actually went wrong.
+
+        Ollama answers /api/generate with 404 when the *model* is unknown, not
+        only when the URL is. Reporting the bare status sends people hunting for
+        a URL problem, so the body — which names the real cause — is surfaced.
+        """
+        detail = ""
         try:
-            response = httpx.get(f"{self.base_url}/api/tags", timeout=3.0)
-            return response.status_code == 200
+            detail = str(response.json().get("error") or "").strip()
+        except (json.JSONDecodeError, AttributeError, ValueError):
+            detail = response.text.strip()[:200]
+
+        if response.status_code == 404 and "not found" in detail.lower():
+            installed = self.list_models()
+            available = f" Installed models: {', '.join(installed)}." if installed else ""
+            return OllamaModelMissing(
+                f"Ollama is running at {self.base_url} but the model "
+                f"'{self.model}' is not installed.{available} "
+                f"Pull it with `ollama pull {self.model}`, or point the tool at a "
+                f"model you already have by setting DECIPHER_OLLAMA_MODEL. "
+                f"(Ollama said: {detail})"
+            )
+
+        suffix = f": {detail}" if detail else ""
+        return OllamaError(
+            f"Ollama returned HTTP {response.status_code} from "
+            f"{self.base_url}/api/generate{suffix}"
+        )
+
+    def list_models(self) -> list[str]:
+        """Model names the runtime currently has installed."""
+        try:
+            response = httpx.get(f"{self.base_url}/api/tags", timeout=5.0)
+            response.raise_for_status()
+            models = response.json().get("models") or []
+        except (httpx.HTTPError, json.JSONDecodeError, AttributeError):
+            return []
+        return [
+            str(entry.get("name") or entry.get("model") or "").strip()
+            for entry in models
+            if entry.get("name") or entry.get("model")
+        ]
+
+    def is_reachable(self) -> bool:
+        """Whether the runtime answers at all, regardless of which models it has."""
+        try:
+            return httpx.get(f"{self.base_url}/api/tags", timeout=3.0).status_code == 200
         except httpx.HTTPError:
             return False
+
+    def has_model(self, installed: list[str] | None = None) -> bool:
+        installed = self.list_models() if installed is None else installed
+        wanted = _tag_key(self.model)
+        return any(_tag_key(name) == wanted for name in installed)
+
+    def is_available(self) -> bool:
+        """Ready to classify: reachable *and* holding the configured model.
+
+        Checking only reachability reported "AI ready" while every call 404'd.
+        """
+        installed = self.list_models()
+        return bool(installed) and self.has_model(installed)
+
+    def status(self) -> dict:
+        """A full picture for the UI, so a misconfiguration is visible up front."""
+        reachable = self.is_reachable()
+        installed = self.list_models() if reachable else []
+        model_present = self.has_model(installed) if installed else False
+
+        if not reachable:
+            detail = f"Ollama is not reachable at {self.base_url}."
+        elif not installed:
+            detail = f"Ollama is running at {self.base_url} but has no models installed."
+        elif not model_present:
+            detail = (
+                f"Ollama is running but '{self.model}' is not installed. "
+                f"Installed: {', '.join(installed)}. Set DECIPHER_OLLAMA_MODEL to one "
+                f"of those, or run `ollama pull {self.model}`."
+            )
+        else:
+            detail = f"Ready with {self.model}."
+
+        return {
+            "available": reachable and model_present,
+            "reachable": reachable,
+            "model_installed": model_present,
+            "url": self.base_url,
+            "model": self.model,
+            "installed_models": installed,
+            "detail": detail,
+        }

@@ -118,7 +118,10 @@ def test_unreachable_ai_degrades_to_fallback_not_a_crash(client, parsed_payload,
     assert body["fallback_count"] == 4
     assert all(q["needs_review"] for q in body["questions"])
     assert all(q["confidence"] == 0.0 for q in body["questions"])
-    assert any("unreachable" in w for w in body["warnings"])
+    # The warning must name the real cause and where to look for it.
+    assert any("not reachable" in w for w in body["warnings"])
+    assert any("fallback" in w for w in body["warnings"])
+    assert "not reachable" in body["ai_detail"]
 
 
 def test_ai_status_reports_reachability(client, fake_ai):

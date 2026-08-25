@@ -45,10 +45,32 @@ ollama serve
 ollama pull llama3.1
 ```
 
+Set `DECIPHER_OLLAMA_MODEL` to whichever model you actually have:
+
+```bash
+ollama list                              # what is installed
+DECIPHER_OLLAMA_MODEL=llama3 ./run.sh    # the default is llama3.1
+```
+
 **The tool works without it.** With no model running, every question falls back
 to the conservative heuristic (title = first line, rest = options), lands at zero
 confidence, and is flagged for review. The header badge shows which mode you are
-in.
+in, and `GET /api/ai-status` reports the same in full.
+
+#### "404 from /api/generate" when a manual request works
+
+Ollama answers `/api/generate` with **404 when the model is unknown**, not only
+when the URL is wrong. A hand-rolled request naming an installed model succeeds
+against the very same endpoint, which makes it look like an endpoint problem
+when it is a model-name problem:
+
+```
+{"error": "model 'llama3.1' not found, try pulling it first"}
+```
+
+The app now reports that verbatim, names the models you do have, and the header
+badge reads "AI model missing" before you upload anything. Either pull the
+configured model or point `DECIPHER_OLLAMA_MODEL` at one you already have.
 
 ### Without the server
 
