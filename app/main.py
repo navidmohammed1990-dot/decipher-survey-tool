@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes_classify import router as classify_router
 from app.api.routes_generate import router as generate_router
 from app.api.routes_parse import router as parse_router
+from app.api.routes_quick import router as quick_router
 from app.api.routes_review import router as review_router
 from app.config import BASE_DIR, settings
 
@@ -43,6 +44,7 @@ app.include_router(parse_router)
 app.include_router(classify_router)
 app.include_router(generate_router)
 app.include_router(review_router)
+app.include_router(quick_router)
 
 
 @app.get("/health", tags=["meta"])
@@ -56,6 +58,12 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/quick", include_in_schema=False)
+async def quick_page() -> FileResponse:
+    """Quick Convert. A second entry point; the DOCX flow at / is unchanged."""
+    return FileResponse(STATIC_DIR / "quick.html")
 
 
 @app.get("/favicon.ico", include_in_schema=False)

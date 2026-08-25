@@ -300,3 +300,74 @@ input[type="text"] {
 }
 .routing-list { margin: 0; padding-left: 18px; font-size: 13px; }
 .routing-list li { margin: 2px 0; }
+
+
+/* -- Quick Convert ------------------------------------------------------ */
+
+.header-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mode-link { color: var(--accent); text-decoration: none; font-size: 13.5px; white-space: nowrap; }
+.mode-link:hover { text-decoration: underline; }
+
+.quick-main { max-width: 1400px; }
+
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pane-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 10px; }
+.pane-title { font-size: 13px; font-weight: 600; }
+.pane-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.kbd-hint { font-size: 12px; }
+
+#paste-input {
+  width: 100%;
+  min-height: 52vh;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+}
+#paste-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.xml-pane {
+  min-height: 52vh;
+  max-height: 52vh;
+  overflow: auto;
+  margin: 0;
+  background: var(--bg);
+}
+.xml-pane:empty::before { content: "Converted XML appears here."; color: var(--muted); }
+
+/* Minimal, dependency-free highlighting of the generated fragments. */
+.xml-pane .t { color: var(--accent); }
+.xml-pane .a { color: var(--good); }
+.xml-pane .v { color: var(--text); }
+.xml-pane .r { color: var(--flag); font-weight: 600; }
+
+.quick-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.quick-card.flagged { border-left: 4px solid var(--flag); }
+.quick-card.confident { border-left: 4px solid var(--good); }
+#quick-cards-section { margin-top: 18px; }
+
+@media (max-width: 900px) {
+  .panes { grid-template-columns: 1fr; }
+  #paste-input, .xml-pane { min-height: 34vh; max-height: none; }
+}

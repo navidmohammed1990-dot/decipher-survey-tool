@@ -233,3 +233,23 @@ def _duplicate_label_warnings(boundaries: list[QuestionBoundary]) -> list[str]:
         for label, count in seen.items()
         if count > 1
     ]
+
+
+def match_question_label(
+    text: str, config: BoundaryConfig | None = None, *, allow_numeric: bool = False
+) -> tuple[str, str, int] | None:
+    """Match a question label at the start of ``text``.
+
+    Returns ``(normalised_label, raw_match, end_offset)``. Shared with the
+    pasted-text splitter so both entry points recognise labels identically —
+    a second implementation would drift from this one.
+    """
+    config = config or BoundaryConfig()
+    prepared = normalize_for_matching(text)
+
+    match = _build_prefixed_pattern(config).match(prepared)
+    if match is None and allow_numeric:
+        match = NUMERIC_PATTERN.match(prepared)
+    if match is None:
+        return None
+    return normalize_label(match.group("label")), match.group(0).strip(), match.end()

@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-7 complete — parse -> classify -> review -> export.**
+**Status: Phases 1-8 complete. Two entry points over one engine.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -32,7 +32,8 @@ machines on the local network can reach it at `http://<your-ip>:8000`.
 
 | URL       | What it is                                          |
 |-----------|-----------------------------------------------------|
-| `/`       | The three-step flow: upload -> review -> export      |
+| `/quick`  | **Quick Convert** — paste a few questions, get XML   |
+| `/`       | Document flow: upload -> review -> export            |
 | `/docs`   | Interactive OpenAPI docs                             |
 | `/health` | Liveness check                                       |
 
@@ -439,6 +440,50 @@ between documents so one client's conventions never leak into another's.
 
 ---
 
+## Phase 8 — Quick Convert
+
+`/quick` is a second entry point, not a replacement. Paste a chunk of
+questionnaire text, press **Convert** (or **Ctrl+Enter**), and the XML appears
+beside it.
+
+Every hard bug so far came from parsing a whole document's structure — table
+cells splitting, headers bleeding between questions, multi-minute batches — not
+from classification or generation, which work once given clean input. A pasted
+chunk skips all of it, because the programmer already did the segmentation by
+choosing what to select, exactly as they do in Sublime.
+
+**The engine is genuinely shared.** Quick Convert owns only the input path: a
+small splitter that collapses copied table rows and defers to the same question
+label detection the document flow uses. The Phase 7 classifier and Phase 6
+generator are reused unchanged. A test pastes a question and uploads the same
+text as a DOCX, then asserts the two produce **byte-identical XML** — if the
+paths ever diverge, it fails.
+
+What the splitter handles:
+
+| Input | Becomes |
+|---|---|
+| `Male<TAB>1` (a copied Word table row) | `Male \| 1`, code `1` preserved |
+| `97. Other, please specify` | text `Other, please specify`, code `97` |
+| Several `Q1.` / `Q2.` labels | one block each |
+| No label at all | one question, labelled `Q1`, with a warning |
+
+Editing a card re-generates through `/api/quick-generate`, which does **not**
+call the model — a type change updates the XML instantly and the paste box is
+never disturbed.
+
+Quick Convert is stateless. It never touches the document flow's draft or its
+correction memory, so converting a paste mid-review disturbs nothing, and one
+questionnaire's house conventions cannot leak into an unrelated paste.
+
+No progress bar here on purpose: chunks are small, so a spinner is enough. A
+paste large enough to feel slow is a signal to paste less — the same natural
+batching Sublime always had — and one over 60k characters is refused with a
+pointer to the document upload.
+
+
+---
+
 ## Project layout
 
 ```
@@ -452,6 +497,7 @@ app/
     routes_classify.py          POST /api/classify, GET /api/ai-status
     routes_generate.py          POST /api/generate, GET /api/export.xml
     routes_review.py            GET/PATCH /api/questions
+    routes_quick.py             POST /api/quick-convert, /api/quick-generate
   models/
     document.py                 Phase 1 output contract
     survey.py                   Intermediate model shared by all phases
@@ -473,12 +519,13 @@ app/
   classify/
     features.py                 Factual line hints (no roles assigned)
     corrections.py              Session-level learning from SP edits
+    paste.py                    Pasted-text splitting (Quick Convert)
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
-  static/                       Review UI (no build step, no dependencies)
+  static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          394 tests
+tests/                          447 tests
 ```
 
 ## Configuration
@@ -548,8 +595,9 @@ These are honest boundaries of Phase 1, not defects:
 | 5     | Resource tags, progress and batching         | ✅ done |
 | 6     | Bug fixes from the first real questionnaire   | ✅ done |
 | 7     | AI-led line classification                   | ✅ done |
-| 8     | Validation and QA reporting                  | next   |
-| 9     | Pilot on real questionnaires                 |        |
+| 8     | Quick Convert (paste entry point)            | ✅ done |
+| 9     | Validation and QA reporting                  | next   |
+| 10    | Pilot on real questionnaires                 |        |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.

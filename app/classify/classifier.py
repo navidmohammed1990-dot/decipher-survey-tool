@@ -126,7 +126,10 @@ def _index_list(payload: dict, key: str, valid: set[int]) -> tuple[list[int], li
             kept.append(item)
 
     warnings = [f"'{key}' referenced unknown lines {dropped}; ignored."] if dropped else []
-    return kept, warnings
+    # Document order, not the order the model happened to list them in. A model
+    # that reasons its way to the main clause first can return title_lines as
+    # [1, 0], which would otherwise assemble the title backwards.
+    return sorted(kept), warnings
 
 
 def _runs_for(indices: list[int], by_index: dict[int, SourceLine]) -> list[TextRun]:
@@ -359,8 +362,14 @@ def classify_question(
     lines: list[SourceLine],
     client: OllamaClient,
     threshold: float = DEFAULT_REVIEW_THRESHOLD,
+    system_prefix: str | None = None,
 ) -> ClassificationOutcome:
-    """Classify one question, degrading to the heuristic on any failure."""
+    """Classify one question, degrading to the heuristic on any failure.
+
+    ``system_prefix`` defaults to the corrections recorded for the document
+    under review. Pass ``""`` to opt out — Quick Convert does, so one
+    questionnaire's house conventions cannot leak into an unrelated paste.
+    """
     if not lines:
         return ClassificationOutcome(
             question=Question(
@@ -372,7 +381,8 @@ def classify_question(
         )
 
     try:
-        system = correction_memory.prompt_prefix() + SYSTEM_PROMPT
+        prefix = correction_memory.prompt_prefix() if system_prefix is None else system_prefix
+        system = prefix + SYSTEM_PROMPT
         payload = client.generate_json(system, build_prompt(label, lines))
         return interpret_response(payload, label, lines, threshold)
     except (OllamaError, ValueError) as exc:

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick Convert — Decipher Survey Base Generator</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="quick">
+<header>
+  <div>
+    <h1>Quick Convert</h1>
+    <p class="subtitle">Paste a few questions &rarr; base Decipher XML</p>
+  </div>
+  <div class="header-right">
+    <a class="mode-link" href="/">Upload a whole document &rarr;</a>
+    <div id="ai-status" class="ai-status">checking AI…</div>
+  </div>
+</header>
+
+<main class="quick-main">
+  <div id="quick-warnings"></div>
+
+  <section class="panes">
+    <div class="pane">
+      <div class="pane-head">
+        <label for="paste-input" class="pane-title">Questionnaire text</label>
+        <span class="muted" id="paste-count"></span>
+      </div>
+      <textarea id="paste-input" spellcheck="false"
+        placeholder="Paste one or more questions here, then press Convert (or Ctrl+Enter).
+
+Q1. Which of these have you bought?
+Please select all that apply.
+Brand A
+Brand B
+Other, please specify"></textarea>
+      <div class="pane-actions">
+        <button id="convert-btn" class="primary">Convert</button>
+        <span class="muted kbd-hint">Ctrl+Enter</span>
+        <span id="quick-status" class="muted" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pane-title">Generated XML</span>
+        <span class="muted" id="xml-meta"></span>
+      </div>
+      <pre id="quick-xml" class="xml-pane" aria-live="polite"></pre>
+      <div class="pane-actions">
+        <button id="copy-btn">Copy</button>
+        <label class="inline">
+          <input type="checkbox" id="quick-wrap">
+          Wrap in &lt;survey&gt; root
+        </label>
+        <span id="copy-state" class="muted"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="quick-cards-section" hidden>
+    <h2 class="section-title">Detected questions</h2>
+    <div id="quick-cards"></div>
+  </section>
+</main>
+
+<template id="quick-card-template">
+  <article class="quick-card">
+    <header class="qc-head">
+      <span class="label-pill"></span>
+      <select class="element-select" aria-label="Decipher element"></select>
+      <span class="confidence"></span>
+      <button class="toggle" aria-expanded="false">Edit</button>
+    </header>
+    <p class="qc-title"></p>
+    <p class="ai-notes"></p>
+    <div class="routing-notes" hidden>
+      <span class="routing-label">Routing / programmer notes — not exported</span>
+      <ul class="routing-list"></ul>
+    </div>
+    <div class="qc-body" hidden>
+      <label>Title<textarea data-field="title" rows="2"></textarea></label>
+      <label>Comment / instruction
+        <select class="resource-select"></select>
+      </label>
+      <label class="custom-comment" hidden>Custom comment text
+        <textarea data-field="comment" rows="2"></textarea></label>
+      <label class="subject-field" hidden>Grid rows describe
+        <select class="subject-select"></select>
+      </label>
+      <label class="options-field">Options
+        <textarea data-field="options" rows="4"></textarea></label>
+      <div class="grid-fields">
+        <label>Rows<textarea data-field="rows" rows="4"></textarea></label>
+        <label>Columns<textarea data-field="cols" rows="4"></textarea></label>
+      </div>
+      <label>Routing notes <span class="muted">(never exported)</span>
+        <textarea data-field="routing_notes" rows="2"></textarea></label>
+    </div>
+  </article>
+</template>
+
+<script src="/static/quick.js"></script>
+</body>
+</html>
