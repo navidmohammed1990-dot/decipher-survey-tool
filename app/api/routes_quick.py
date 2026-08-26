@@ -51,6 +51,12 @@ class QuickConvertResponse(BaseModel):
     ai_available: bool = True
     ai_detail: str = ""
     fallback_count: int = 0
+    timings: list[dict] = Field(default_factory=list)
+    """What Ollama reported for each call: load, prompt and generation time.
+
+    Surfaced because generation speed is the evidence that separates GPU from
+    CPU inference, and it is otherwise invisible from inside the app.
+    """
 
 
 @router.post("/quick-convert", response_model=QuickConvertResponse)
@@ -113,6 +119,7 @@ def quick_convert(
     xml, well_formed, error = _render(questions)
     return QuickConvertResponse(
         questions=questions,
+        timings=list(client.stats),
         xml=xml,
         well_formed=well_formed,
         error=error,

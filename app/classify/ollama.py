@@ -45,6 +45,8 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.stats: list[dict] = []
+        """Per-call timings, newest last. See :meth:`record_stats`."""
 
     def generate_json(self, system: str, prompt: str) -> dict:
         """Ask the model for one JSON object.
@@ -77,6 +79,8 @@ class OllamaClient:
         except json.JSONDecodeError as exc:
             raise OllamaError("Ollama returned a non-JSON envelope.") from exc
 
+        self.record_stats(body)
+
         raw = body.get("response")
         if not isinstance(raw, str) or not raw.strip():
             raise OllamaError("Ollama returned an empty response.")
@@ -89,6 +93,49 @@ class OllamaClient:
         if not isinstance(parsed, dict):
             raise OllamaError(f"Expected a JSON object, got {type(parsed).__name__}.")
         return parsed
+
+    def record_stats(self, body: dict) -> dict | None:
+        """Keep the timings Ollama reports alongside every response.
+
+        Ollama returns these on a non-streaming call and they answer the
+        question `ollama ps` answers, without needing to catch a request in
+        flight: generation speed on an 8B model is roughly 2-8 tokens/sec on
+        CPU and 30-100+ on GPU, so eval_tokens_per_second separates the two.
+        Durations are nanoseconds.
+        """
+        if not isinstance(body, dict) or "total_duration" not in body:
+            return None
+
+        def seconds(key: str) -> float:
+            value = body.get(key) or 0
+            return round(value / 1_000_000_000, 3)
+
+        prompt_tokens = body.get("prompt_eval_count") or 0
+        eval_tokens = body.get("eval_count") or 0
+        prompt_seconds = seconds("prompt_eval_duration")
+        eval_seconds = seconds("eval_duration")
+
+        entry = {
+            "model": body.get("model") or self.model,
+            "total_seconds": seconds("total_duration"),
+            "load_seconds": seconds("load_duration"),
+            "prompt_tokens": prompt_tokens,
+            "prompt_seconds": prompt_seconds,
+            "output_tokens": eval_tokens,
+            "output_seconds": eval_seconds,
+            "prompt_tokens_per_second": round(prompt_tokens / prompt_seconds, 1) if prompt_seconds else None,
+            "output_tokens_per_second": round(eval_tokens / eval_seconds, 1) if eval_seconds else None,
+        }
+        self.stats.append(entry)
+        logger.info(
+            "Ollama %s: %.1fs total (load %.1fs, prompt %d tok in %.1fs, "
+            "output %d tok in %.1fs, %s tok/s output)",
+            entry["model"], entry["total_seconds"], entry["load_seconds"],
+            entry["prompt_tokens"], entry["prompt_seconds"],
+            entry["output_tokens"], entry["output_seconds"],
+            entry["output_tokens_per_second"],
+        )
+        return entry
 
     def _error_for(self, response) -> OllamaError:
         """Turn an HTTP error into one that says what actually went wrong.
@@ -155,9 +202,13 @@ class OllamaClient:
         return bool(installed) and self.has_model(installed)
 
     def status(self) -> dict:
-        """A full picture for the UI, so a misconfiguration is visible up front."""
-        reachable = self.is_reachable()
-        installed = self.list_models() if reachable else []
+        """A full picture for the UI, so a misconfiguration is visible up front.
+
+        One /api/tags round trip: listing the models already proves the runtime
+        answers, so probing reachability separately was a wasted request.
+        """
+        installed = self.list_models()
+        reachable = bool(installed) or self.is_reachable()
         model_present = self.has_model(installed) if installed else False
 
         if not reachable:

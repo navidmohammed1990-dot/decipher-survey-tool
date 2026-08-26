@@ -476,6 +476,40 @@ Quick Convert is stateless. It never touches the document flow's draft or its
 correction memory, so converting a paste mid-review disturbs nothing, and one
 questionnaire's house conventions cannot leak into an unrelated paste.
 
+### Session history
+
+Each successful Convert appends a snapshot — the pasted text and the XML it
+produced — to a list below the workspace, newest first. Converting again only
+adds an entry; it never rewrites one already there. Every entry has its own
+**Copy** button, independent of the active pane, and can be loaded back into the
+paste box to re-run.
+
+History lives in `sessionStorage`: it survives an accidental reload and
+disappears when the tab closes, which is the intended lifetime. **Known
+limitation:** it is not durable storage — closing the tab or using another
+browser loses it, and it is per-browser, not shared between people.
+
+### Where the time goes
+
+Every response carries what Ollama reported about it — load, prompt evaluation
+and generation time, with tokens per second — returned as `timings` and
+summarised under the panes. Generation speed is the number that matters:
+
+| Output tokens/sec (8B model) | What it means |
+|---|---|
+| 30-100+ | GPU acceleration is working |
+| under 10 | CPU inference — expect 60-90s per question |
+
+If the rate is in single digits, the tool says so and points at
+`DECIPHER_OLLAMA_MODEL`. A smaller model is the practical fix: this task is
+constrained JSON classification, not open-ended generation, so a 3B-class model
+is often nearly as accurate and several times faster.
+
+```bash
+ollama pull llama3.2:3b
+DECIPHER_OLLAMA_MODEL=llama3.2:3b ./run.sh
+```
+
 No progress bar here on purpose: chunks are small, so a spinner is enough. A
 paste large enough to feel slow is a signal to paste less — the same natural
 batching Sublime always had — and one over 60k characters is refused with a
@@ -525,7 +559,7 @@ app/
     resources.py                <res> catalog and the element -> tag map
   static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          447 tests
+tests/                          460 tests
 ```
 
 ## Configuration

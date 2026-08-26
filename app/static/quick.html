@@ -60,11 +60,44 @@ Other, please specify"></textarea>
     </div>
   </section>
 
+  <p id="perf-note" class="muted perf-note" hidden></p>
+
   <section id="quick-cards-section" hidden>
     <h2 class="section-title">Detected questions</h2>
     <div id="quick-cards"></div>
   </section>
+  <section id="history-section" hidden>
+    <div class="history-head">
+      <h2 class="section-title">This session's conversions</h2>
+      <span class="muted" id="history-count"></span>
+      <button id="clear-history" class="ghost">Clear</button>
+    </div>
+    <div id="history-list"></div>
+  </section>
 </main>
+
+<template id="history-template">
+  <article class="history-entry">
+    <header class="history-entry-head">
+      <button class="history-toggle" aria-expanded="false">
+        <span class="history-caret">&#9656;</span>
+        <span class="history-title"></span>
+      </button>
+      <span class="history-meta muted"></span>
+      <button class="history-copy">Copy</button>
+    </header>
+    <div class="history-body" hidden>
+      <div class="history-panes">
+        <pre class="history-input"></pre>
+        <pre class="history-xml xml-pane"></pre>
+      </div>
+      <div class="history-actions">
+        <button class="history-restore ghost">Load back into the paste box</button>
+        <span class="history-state muted"></span>
+      </div>
+    </div>
+  </article>
+</template>
 
 <template id="quick-card-template">
   <article class="quick-card">

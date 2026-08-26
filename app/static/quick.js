@@ -16,6 +16,10 @@ let questions = [];
 let resourceCatalog = [];
 let subjectTypes = [];
 let converting = false;
+let history = [];
+
+const HISTORY_KEY = "quick-convert-history";
+const HISTORY_LIMIT = 50;
 
 /* -- convert ------------------------------------------------------------ */
 
@@ -55,6 +59,10 @@ async function convert() {
     renderCards();
     showXml(body);
     renderWarnings(body.warnings, body);
+    showTimings(body.timings);
+    // Purely additive: a snapshot of this conversion, leaving the workspace as
+    // it is. Later converts add entries, they never rewrite existing ones.
+    addHistory(text, body);
     setStatus(`Converted ${questions.length} question(s).`);
   } catch (error) {
     setStatus(error.message, true);
@@ -377,3 +385,158 @@ function renderWarnings(warnings, body) {
     badge.classList.add("down");
   }
 })();
+
+
+/* -- session history ----------------------------------------------------
+
+   Kept in sessionStorage rather than a plain array: it survives an accidental
+   reload and still disappears when the tab closes, which is the intended
+   lifetime. It is not durable storage — see the README's known limitations. */
+
+function loadHistory() {
+  try {
+    const stored = sessionStorage.getItem(HISTORY_KEY);
+    history = stored ? JSON.parse(stored) : [];
+  } catch {
+    history = [];
+  }
+  if (!Array.isArray(history)) history = [];
+  renderHistory();
+}
+
+function saveHistory() {
+  try {
+    sessionStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    // A full or unavailable store must not break converting; the in-memory
+    // list still shows this session's entries.
+  }
+}
+
+function addHistory(text, body) {
+  const labels = (body.questions || []).map((question) => question.label);
+  history.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: new Date().toISOString(),
+    text,
+    xml: body.xml || "",
+    labels,
+    count: labels.length,
+  });
+  history = history.slice(0, HISTORY_LIMIT);
+  saveHistory();
+  renderHistory();
+}
+
+function renderHistory() {
+  const section = $("history-section");
+  section.hidden = history.length === 0;
+  $("history-count").textContent = history.length
+    ? `${history.length} conversion${history.length === 1 ? "" : "s"}`
+    : "";
+  $("history-list").replaceChildren(...history.map(historyEntry));
+}
+
+function historyEntry(entry) {
+  const node = $("history-template").content.cloneNode(true);
+  const root = node.querySelector(".history-entry");
+
+  const summary = entry.labels.length
+    ? entry.labels.join(", ")
+    : firstLine(entry.text);
+  root.querySelector(".history-title").textContent = summary;
+  root.querySelector(".history-meta").textContent =
+    `${entry.count} question${entry.count === 1 ? "" : "s"} · ${clockTime(entry.at)}`;
+  root.querySelector(".history-input").textContent = entry.text;
+  root.querySelector(".history-xml").textContent = entry.xml;
+
+  const body = root.querySelector(".history-body");
+  const toggle = root.querySelector(".history-toggle");
+  toggle.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    toggle.setAttribute("aria-expanded", String(!body.hidden));
+  });
+
+  // Each entry copies its own XML, independent of the active pane.
+  root.querySelector(".history-copy").addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const state = root.querySelector(".history-state");
+    try {
+      await navigator.clipboard.writeText(entry.xml);
+      flashHistory(root, "Copied");
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(root.querySelector(".history-xml"));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      flashHistory(root, "Selected — press Ctrl+C");
+    }
+    if (state) state.scrollIntoView?.({ block: "nearest" });
+  });
+
+  root.querySelector(".history-restore").addEventListener("click", () => {
+    input.value = entry.text;
+    input.dispatchEvent(new Event("input"));
+    input.focus();
+    setStatus("Loaded that text back into the paste box. Convert to run it again.");
+  });
+
+  return node;
+}
+
+function flashHistory(root, message) {
+  const state = root.querySelector(".history-state");
+  state.textContent = message;
+  setTimeout(() => { state.textContent = ""; }, 2500);
+}
+
+const firstLine = (text) => {
+  const line = (text || "").split("\n").find((candidate) => candidate.trim());
+  return line ? line.trim().slice(0, 80) : "(empty)";
+};
+
+function clockTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+$("clear-history").addEventListener("click", () => {
+  history = [];
+  saveHistory();
+  renderHistory();
+});
+
+/* -- performance note ---------------------------------------------------- */
+
+function showTimings(timings) {
+  const note = $("perf-note");
+  const usable = (timings || []).filter((entry) => entry.total_seconds);
+  if (!usable.length) {
+    note.hidden = true;
+    return;
+  }
+
+  const total = usable.reduce((sum, entry) => sum + entry.total_seconds, 0);
+  const rates = usable.map((entry) => entry.output_tokens_per_second).filter(Boolean);
+  const slowest = rates.length ? Math.min(...rates) : null;
+
+  let text = `Model time: ${total.toFixed(1)}s across ${usable.length} call(s)`;
+  if (slowest) {
+    text += ` · ${slowest} output tokens/sec`;
+    // Sustained single-digit tokens/sec on an 8B model means CPU inference.
+    if (slowest < 10) {
+      text += " — that rate indicates CPU inference. A smaller model will be much faster;"
+        + " see DECIPHER_OLLAMA_MODEL.";
+    }
+  }
+  note.textContent = text;
+  note.hidden = false;
+}
+
+loadHistory();
