@@ -74,18 +74,41 @@ def _build_prefixed_pattern(config: BoundaryConfig) -> re.Pattern:
 #: Fallback for questionnaires that number questions without a letter prefix.
 NUMERIC_PATTERN = re.compile(r"^[ \t]*(?P<label>\d{1,3})(?P<sep>[.)][ \t]*)")
 
-#: A house-style header introducing the question that follows it, e.g.
-#: "ASK ALL, SC" or "[MC]". These sit *above* their question's label, so they
-#: land at the tail of the previous question unless reassigned.
-QUESTION_HEADER = re.compile(
-    r"""^[ \t]*[\[\(]?[ \t]*
-    (?:
-        ASK[ \t]+(?:ALL|IF|ONLY[ \t]+IF)\b
-      | (?:SC|MC|OE|NUM|GRID)[ \t]*[\],;:.\)]?[ \t]*$
-    )
-    """,
-    re.VERBOSE | re.IGNORECASE,
+#: An "ASK ..." opener. Narrow on purpose: it names the audience for the
+#: question that FOLLOWS. Other routing keywords do not - a "TERMINATE IF"
+#: after a question's options belongs to that question - so they stay put.
+_ASK_OPENER = re.compile(
+    r"^[ \t]*[\[\(]?[ \t]*ASK[ \t]+(?:ALL|IF|ONLY[ \t]+IF)\b",
+    re.IGNORECASE,
 )
+
+#: Brackets and punctuation a marker may be dressed in. A marker introducing
+#: the next question sits alone on its line; a sentence that merely contains
+#: "SC" does not.
+_MARKER_DRESSING = re.compile(r"[\[\]\(\),;:.\-\t ]")
+
+
+def is_question_header(text: str) -> bool:
+    """Whether this line introduces the question that follows it.
+
+    A house-style header - "ASK ALL, SC", "[MC]", "SR PER ROW" - sits *above*
+    its own question's label, so plain segmentation leaves it at the tail of
+    the previous question.
+
+    Which markers count is asked of :func:`detect_type_tag`, the one place that
+    knows them, rather than answered by a second list here. The second list is
+    how "SR" and "MR" came to be stranded: they were added as type tags and
+    never added here, so a grid's own header stayed on the question above it.
+    """
+    from app.classify.features import detect_type_tag_span
+
+    if _ASK_OPENER.match(text):
+        return True
+    found = detect_type_tag_span(text)
+    if found is None:
+        return False
+    _, start, end = found
+    return not _MARKER_DRESSING.sub("", text[:start] + text[end:]).strip()
 
 
 def normalize_label(raw: str) -> str:
@@ -151,9 +174,18 @@ def detect_boundaries(
             )
 
     if not matches:
-        warnings.append("No question boundaries detected in this document.")
         if not blocks:
+            warnings.append("No question boundaries detected in this document.")
             return [], warnings
+        segments = _gap_segments(blocks)
+        if len(segments) > 1:
+            warnings.append(
+                f"No question label the tool could read; split on blank lines "
+                f"instead and found {len(segments)} question(s), given placeholder "
+                f"labels. Please confirm/correct each label."
+            )
+            return segments, warnings
+        warnings.append("No question boundaries detected in this document.")
         return [_preamble_segment(blocks, len(blocks))], warnings
 
     boundaries: list[QuestionBoundary] = []
@@ -217,7 +249,7 @@ def _reassign_trailing_headers(boundaries: list[QuestionBoundary], by_index: dic
                 current.block_indices.pop()
                 moved.insert(0, index)
                 continue
-            if not QUESTION_HEADER.match(block.text):
+            if not is_question_header(block.text):
                 break
             current.block_indices.pop()
             moved.insert(0, index)
@@ -228,6 +260,46 @@ def _reassign_trailing_headers(boundaries: list[QuestionBoundary], by_index: dic
         following.block_indices[:0] = moved
         current.end_index = current.block_indices[-1]
         following.start_index = following.block_indices[0]
+
+
+def _gap_segments(blocks: list[Block]) -> list[QuestionBoundary]:
+    """Split on blank paragraphs when no label pattern matched.
+
+    A blank line between questions is the one separator every questionnaire
+    uses, whatever it calls its questions. Without this a house style the
+    label regex has never met - Sent1, Sent1B, Sent2 - makes the whole
+    document one undifferentiated preamble and nothing gets classified.
+    """
+    groups: list[list[Block]] = []
+    current: list[Block] = []
+    for block in blocks:
+        if isinstance(block, ParagraphBlock) and block.is_empty:
+            if current:
+                groups.append(current)
+                current = []
+            continue
+        current.append(block)
+    if current:
+        groups.append(current)
+
+    segments: list[QuestionBoundary] = []
+    for position, group in enumerate(groups, start=1):
+        head = group[0]
+        runs = head.runs if isinstance(head, ParagraphBlock) else []
+        indices = [block.index for block in group]
+        segments.append(
+            QuestionBoundary(
+                label=f"Q{position}",
+                block_indices=indices,
+                start_index=indices[0],
+                end_index=indices[-1],
+                title_block_index=head.index if isinstance(head, ParagraphBlock) else None,
+                title_runs=list(runs),
+                title_text=collapse_whitespace(runs_to_text(runs)),
+                pattern="gap",
+            )
+        )
+    return segments
 
 
 def _preamble_segment(blocks: list[Block], stop: int) -> QuestionBoundary:

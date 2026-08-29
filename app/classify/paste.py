@@ -33,6 +33,14 @@ _ALIGNED_ROW_NOTE = re.compile(
     r"^(?P<text>\S.*?\S)[ \t]{2,}(?P<code>\d{1,3})[ \t]{2,}(?P<note>\S.*?)\s*$"
 )
 
+#: Three or more columns laid out with runs of spaces instead of tabs or pipes.
+#: A grid's scale row arrives this way as often as any other, and detection must
+#: not depend on which one a document used - a space-aligned "Strongly Disagree
+#: Disagree Neither Agree Strongly Agree" collapsed into a single line, and the
+#: grid became a flat radio. Three columns are required so an ordinary option
+#: with a column-aligned code, or a sentence with a double space, is left alone.
+_ALIGNED_COLUMNS = re.compile(r"[ \t]{2,}")
+
 #: A column-aligned code: two or more spaces, then a short number, at line end.
 #: Word pastes table columns as runs of spaces as often as it does tabs, and
 #: whitespace collapsing happens before codes are read — so without this the
@@ -42,6 +50,11 @@ _ALIGNED_CODE = re.compile(r"^(?P<text>\S.*?\S)[ \t]{2,}(?P<code>\d{1,3})\s*$")
 
 #: A label with no question after it still deserves a block.
 DEFAULT_LABEL = "Q1"
+
+#: Said on a question whose label the tool could not read.
+UNLABELLED_NOTE = (
+    "No label pattern recognized - please confirm/correct this question's label."
+)
 
 #: Strikethrough as it survives a copy-paste into a plain textarea. Word's own
 #: formatting is read from the run in the DOCX path; pasted text keeps only
@@ -76,17 +89,40 @@ def join_cells(line: str) -> str:
     aligned = _ALIGNED_CODE.match(line)
     if aligned:
         return f"{aligned.group('text')} | {aligned.group('code')}"
+
+    columns = [cell.strip() for cell in _ALIGNED_COLUMNS.split(line.strip()) if cell.strip()]
+    if len(columns) > 2:
+        return " | ".join(columns)
     return line.strip()
 
 
 def normalise_lines(text: str) -> list[str]:
     """Pasted text as clean, non-empty lines with table rows kept whole."""
-    lines: list[str] = []
+    return [line for block in paragraph_blocks(text) for line in block]
+
+
+def paragraph_blocks(text: str) -> list[list[str]]:
+    """Pasted text grouped by blank-line gaps.
+
+    Blank lines are the one segmentation signal every questionnaire uses,
+    whatever it calls its questions. Relying on a label pattern alone meant a
+    house style the regex did not know - Sent1, Sent1B, Sent2 - collapsed five
+    questions into one block with duplicate row labels.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] = []
+
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         joined = collapse_whitespace(join_cells(raw))
         if joined:
-            lines.append(joined)
-    return lines
+            current.append(joined)
+        elif current:
+            blocks.append(current)
+            current = []
+
+    if current:
+        blocks.append(current)
+    return blocks
 
 
 def _strip_strike(text: str) -> tuple[str, bool]:
@@ -199,91 +235,150 @@ def expand_scale_lines(lines: list[str]) -> list[str]:
     return expanded
 
 
+def _all_coded(lines: list[str]) -> bool:
+    """Whether every line here already carries a code.
+
+    A block like that is an answer list that happened to sit under its own
+    blank line, not a question of its own.
+    """
+    from app.classify.features import detect_trailing_code
+
+    return bool(lines) and all(detect_trailing_code(line) for line in lines)
+
+
+def _next_placeholder(used: set[str], counter: int) -> tuple[str, int]:
+    """A label for a question whose own label could not be read."""
+    while True:
+        counter += 1
+        candidate = f"Q{counter}"
+        if candidate not in used:
+            return candidate, counter
+
+
 def split_questions(
     text: str, config: BoundaryConfig | None = None
 ) -> tuple[list[PastedQuestion], list[str]]:
-    """Split a paste into question blocks, reusing the DOCX label detection.
+    """Split a paste into question blocks.
 
-    A paste with no recognisable label is treated as a single question rather
-    than rejected: the programmer selected this chunk deliberately, and one
-    unlabelled question is a normal thing to paste.
+    Blank-line gaps segment first and label matching refines, rather than the
+    other way round: a label the regex cannot read must not be able to merge
+    several questions into one.
     """
-    lines = expand_scale_lines(normalise_lines(text))
-    if not lines:
+    raw_blocks = [expand_scale_lines(block) for block in paragraph_blocks(text)]
+    raw_blocks = [block for block in raw_blocks if block]
+    if not raw_blocks:
         return [], ["Nothing to convert - the pasted text is empty."]
 
     config = config or BoundaryConfig()
     warnings: list[str] = []
 
-    matches = [
-        (position, match_question_label(line, config))
-        for position, line in enumerate(lines)
-    ]
-    labelled = [(position, found) for position, found in matches if found]
-
-    if not labelled:
-        # Try plain "1." numbering only when nothing else matched, so a numbered
-        # option list inside a labelled question is never mistaken for a split.
-        labelled = [
+    def labels_in(lines: list[str], allow_numeric: bool) -> list[tuple[int, tuple]]:
+        return [
             (position, found)
-            for position, found in (
-                (position, match_question_label(line, config, allow_numeric=True))
-                for position, line in enumerate(lines)
-            )
+            for position, line in enumerate(lines)
+            for found in [match_question_label(line, config, allow_numeric=allow_numeric)]
             if found
         ]
-        if labelled:
-            warnings.append(
-                f"No Q-style labels found; split on plain numbering into "
-                f"{len(labelled)} question(s). Check the split is right."
-            )
 
-    if not labelled:
+    anywhere = any(labels_in(block, False) for block in raw_blocks)
+    allow_numeric = not anywhere
+    if allow_numeric and any(labels_in(block, True) for block in raw_blocks):
         warnings.append(
-            f"No question label found; treated the whole paste as one question "
-            f"labelled {DEFAULT_LABEL}."
+            "No Q-style labels found; split on plain numbering instead. "
+            "Check the split is right."
         )
-        return [
-            PastedQuestion(
-                label=DEFAULT_LABEL,
-                synthesised_label=True,
-                lines=merge_wrapped_options(
-                    [
-                        _build_line(index, text, struck)
-                        for index, (text, struck) in enumerate(mark_struck(lines))
-                    ]
-                ),
-            )
-        ], warnings
+
+    # When the paste uses labels at all, a block without one is a continuation
+    # of the question above it - a grid's scale and rows under their own blank
+    # line, an answer list, a routing note - not a new question. When *no*
+    # block carries a label, blank lines are the only separator there is and
+    # each block has to stand as its own question.
+    uses_labels = any(labels_in(block, allow_numeric) for block in raw_blocks)
 
     questions: list[PastedQuestion] = []
-    if labelled[0][0] > 0:
+    used: set[str] = set()
+    counter = 0
+    unlabelled = 0
+    continuations = 0
+
+    for block in raw_blocks:
+        matches = labels_in(block, allow_numeric)
+
+        if not matches:
+            # A run of coded answers under its own blank line belongs to the
+            # question above it, not to a new one.
+            if questions and (uses_labels or _all_coded(block)):
+                if not _all_coded(block):
+                    continuations += 1
+                questions[-1].lines.extend(
+                    _build_line(0, t, s) for t, s in mark_struck(block)
+                )
+                questions[-1].lines = merge_wrapped_options(questions[-1].lines)
+                _renumber(questions[-1])
+                continue
+
+            label, counter = _next_placeholder(used, counter)
+            used.add(label)
+            unlabelled += 1
+            questions.append(
+                PastedQuestion(
+                    label=label,
+                    synthesised_label=True,
+                    lines=merge_wrapped_options(
+                        [
+                            _build_line(index, t, s)
+                            for index, (t, s) in enumerate(mark_struck(block))
+                        ]
+                    ),
+                )
+            )
+            continue
+
+        if matches[0][0] > 0:
+            warnings.append(
+                f"{matches[0][0]} line(s) before the first label in a block were ignored."
+            )
+
+        for order, (start, found) in enumerate(matches):
+            label, raw, end = found
+            stop = matches[order + 1][0] if order + 1 < len(matches) else len(block)
+
+            body: list[str] = []
+            remainder = block[start][end:].strip()
+            if remainder:
+                body.append(remainder)
+            body.extend(block[start + 1:stop])
+
+            used.add(label)
+            questions.append(
+                PastedQuestion(
+                    label=label,
+                    raw_label=raw,
+                    lines=merge_wrapped_options(
+                        [
+                            _build_line(index, t, s)
+                            for index, (t, s) in enumerate(mark_struck(body))
+                        ]
+                    ),
+                )
+            )
+
+    if unlabelled == 1 and len(questions) == 1:
         warnings.append(
-            f"{labelled[0][0]} line(s) before the first question label were ignored."
+            f"No question label was found, so the tool treated the whole paste as "
+            f"one question. {UNLABELLED_NOTE}"
+        )
+    elif unlabelled:
+        warnings.append(
+            f"{unlabelled} question(s) had no label the tool could read; they were "
+            f"separated by blank lines and given placeholder labels. "
+            f"{UNLABELLED_NOTE}"
         )
 
-    for order, (start, found) in enumerate(labelled):
-        label, raw, end = found
-        stop = labelled[order + 1][0] if order + 1 < len(labelled) else len(lines)
-
-        # The text after the label on its own line is the question's first line.
-        block: list[str] = []
-        remainder = lines[start][end:].strip()
-        if remainder:
-            block.append(remainder)
-        block.extend(lines[start + 1:stop])
-
-        questions.append(
-            PastedQuestion(
-                label=label,
-                raw_label=raw,
-                lines=merge_wrapped_options(
-                    [
-                        _build_line(index, text, struck)
-                        for index, (text, struck) in enumerate(mark_struck(block))
-                    ]
-                ),
-            )
+    if continuations:
+        warnings.append(
+            f"{continuations} unlabelled block(s) were attached to the question "
+            f"above them. If one was meant to be its own question, split it out."
         )
 
     duplicates = {q.label for q in questions if [x.label for x in questions].count(q.label) > 1}
@@ -291,3 +386,11 @@ def split_questions(
         warnings.append(f"Duplicate question label(s): {', '.join(sorted(duplicates))}.")
 
     return questions, warnings
+
+
+def _renumber(question: PastedQuestion) -> None:
+    """Keep line indices dense after extending a question."""
+    question.lines = [
+        line.model_copy(update={"index": index})
+        for index, line in enumerate(question.lines)
+    ]

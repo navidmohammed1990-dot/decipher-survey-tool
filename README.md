@@ -746,31 +746,75 @@ plainly rather than guessing.
 
 Confirmed corrections are recorded to a Quick Convert correction library —
 separate from the document flow's, preserving Phase 8's isolation — so both
-correction routes feed the same learning. **Known limitation:** that library is
-in-memory and dies with the server; durable persistence is Phase 10, which is
-not built.
+correction routes feed the same learning. Phase 10 made that library durable,
+so confirmed corrections now survive a restart.
 
 ---
 
-## Reference dataset — not yet wired
+## Phase 15 — Judging meaning, not matching an example
 
-`reference/question_examples.yaml` holds real input patterns paired with their
-correct classification. **Nothing reads it today.** Phase 12 — the loader and
-regression harness that would consume it — is not implemented. To wire it up:
+Two live-testing bugs shared one cause: code that recognised a *specific
+example* rather than the idea behind it. Both are fixed at that level.
 
-1. Add `pyyaml` to `requirements.txt` (not currently a dependency).
-2. A loader that parses each entry into an input string plus expected outcome.
-3. A translation layer: the YAML's `expected` shape (`rows`, `comment_tag`,
-   `open`, `randomize_off`) is not the `Question` model's shape, so a mapping is
-   needed to compare them.
-4. A regression test that runs every entry and reports which drift.
-5. Optionally, feeding selected entries into `seed_library.py` as few-shot
-   examples — mindful that each one costs prompt tokens on every call.
+### Blank lines are a segmentation signal
 
-Several entries also describe behaviour that does not exist yet (`custom_complex`,
-`excluded`/strikethrough, two-table grids, multi-line wrapped options), so a
-harness run today would fail on them by design.
+Segmentation leaned entirely on the label regex. A house style it had never
+met — `Sent1.`, `Sent1B.`, `Sent2.`, four letters where the shape allows
+three — meant an 87-line paste of five questions became **one** question, with
+duplicate row labels and options bleeding between questions.
 
+A blank line between questions is the one separator every questionnaire uses,
+whatever it calls its questions. Both entry points now split on gaps first and
+look for labels *within* each block:
+
+| paste | result |
+|---|---|
+| unreadable labels, blank lines between | one question per gap, placeholder labels, warning to confirm each |
+| no labels anywhere, blank lines between | one question per gap |
+| readable labels, no blank lines | split on labels, exactly as before |
+| one unbroken paragraph | one question — the old fallback survives |
+
+Where the paste *does* use labels, a block without one is read as a
+continuation of the question above it — a grid's scale under its own blank
+line, a stray answer list — and says so in a warning, so a genuine unlabelled
+question can be split out. The DOCX path had the same gap: a document with
+unreadable labels used to yield zero questions and one giant preamble.
+
+### A grid is a concept, not a phrase
+
+Grid detection matched the literal string `SR PER ROW`. A real questionnaire
+wrote `SR per statement`, so APP3 came out as a flat radio with the scale
+labels and the statements flattened into duplicate-labelled `<row>` elements —
+invalid XML.
+
+The hint now matches the *shape* of the idea — `SR`/`MR` followed by
+"per"/"for each"/"against each" and a noun — and the classifier prompt
+describes what a grid **is**, with several phrasings, so the model recognises
+the concept rather than a remembered string. `SR`/`MR` stay case-sensitive so
+"Mr. Smith" is not a type marker; `$5 per month` and "how many times per week"
+are not grids.
+
+Layout no longer matters either. A space-aligned scale used to collapse into a
+single line, because only tabs and pipes were read as column separators:
+
+```
+     Strongly Disagree   Disagree   Neither   Agree
+             1               2         3        4
+```
+
+Space-, tab- and pipe-separated tables now produce identical lines — asserted
+by a test that runs all three through and compares.
+
+### Audit: the same gap elsewhere
+
+Looking for other places where a specific example decides something:
+
+| site | verdict |
+|---|---|
+| `QUESTION_HEADER` in `question_boundaries.py` | **fixed** — kept its own marker list, which had drifted: `SR`, `MR` and every grid phrasing were stranded on the previous question. It now asks `detect_type_tag_span`, the one place that knows markers, and treats a line as a header only when the marker *is* the whole line. |
+| `MIN_FRAGMENT_CHARS = 25` in `wrapping.py` | **fixed** — calibrated to `S2_AGE BANDS` and one long option, so it missed every wrap in a narrow table column. Now measured against the block's own widest line: a line wraps at the margin, so half an option is long *for its block*. |
+| `ROUTING_KEYWORDS`, `TYPE_TAGS` | **acceptable** — Phase 7 hints, evidence for the AI, never gates. The disagreement net exists for exactly when they mislead. |
+| `_OTHER` / `_NONE_OF` in `labels.py` | **acceptable** — r91/r99 is a house convention with fixed wording, and explicit source codes already outrank it. |
 
 ---
 

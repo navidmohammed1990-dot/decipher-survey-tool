@@ -103,6 +103,15 @@ options are present (SC->radio, MC->checkbox) unless the options clearly
 form a grid (row statements x column scale). If no options exist, ignore
 any type_signal and classify from the question's wording instead.
 
+A grid asks the SAME scale about SEVERAL things. Judge that from meaning, not
+a remembered phrase: "SR PER ROW", "SR per statement", "MR per brand", "one
+answer for each item", "rate each of the following", or nothing at all. Layout
+does not matter either - the scale may be pipe, tab or space separated, or
+listed above the statements. If one set of lines is a repeated answer scale and
+another is the things being rated, it is a grid: scale in col_lines, things in
+row_lines, option_lines empty. SR/single -> radio_grid, MR/multi ->
+checkbox_grid.
+
 For grids only, also say what the ROWS describe with subject_type: one of
 brand, category, product, statement, none. Use "statement" if unclear.
 

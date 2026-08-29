@@ -80,8 +80,21 @@ _TYPE_TAG_RE = re.compile(
     r"(?:^|[,;:\-\s\[\(])(" + "|".join(TYPE_TAGS) + r")(?:$|[,;:\-\s\]\)])"
 )
 
-#: "SR PER ROW" / "MR PER ROW" mark a grid: one response per statement.
-_PER_ROW_RE = re.compile(r"\b(SR|MR)\s+PER\s+ROW\b")
+#: A grid marker: one response per repeated thing. House styles write the same
+#: idea a dozen ways - "SR PER ROW", "SR per statement", "MR per brand",
+#: "SR for each item" - so this matches the *shape* of the idea rather than one
+#: remembered phrase. Matching only "SR PER ROW" is what made an APP3 grid come
+#: out as a flat radio. SR/MR stay case-sensitive so "Mr. Smith" is not a type
+#: marker; the words around them are not.
+_PER_ROW_RE = re.compile(r"\b(SR|MR)\b[\s,:;\-]*(?i:per|for\s+each|against\s+each)\s+\w+")
+
+#: The same idea written without an SR/MR marker at all. Which kind of grid is
+#: then the AI's call, so this only says "grid".
+_GRID_PHRASE_RE = re.compile(
+    r"\b(?:one|single|1)\s+\w*\s*(?:response|answer|selection|code)\s+"
+    r"(?:per|for\s+each)\s+\w+",
+    re.IGNORECASE,
+)
 
 #: A code the source gave an option, e.g. "Male | 1", "Other (97)", "None [99]".
 _TRAILING_CODE_RE = re.compile(
@@ -182,14 +195,31 @@ def strip_trailing_code(text: str) -> str:
     return _TRAILING_CODE_RE.sub("", text).strip(" |-–—\t")
 
 
-def detect_type_tag(text: str) -> str | None:
-    """An explicit SC/MC/SR/MR-style marker, if the line carries one."""
+def detect_type_tag_span(text: str) -> tuple[str, int, int] | None:
+    """An explicit type marker with the span it occupies, if the line has one.
+
+    The span is what lets a caller ask "is this line *only* a marker?" without
+    keeping its own copy of the marker vocabulary - which is how the boundary
+    detector's list came to be missing SR and MR.
+    """
     per_row = _PER_ROW_RE.search(text)
     if per_row:
-        return f"{per_row.group(1)}_GRID"
+        return f"{per_row.group(1)}_GRID", per_row.start(), per_row.end()
 
     match = _TYPE_TAG_RE.search(text)
-    return TYPE_TAGS[match.group(1).upper()] if match else None
+    if match:
+        return TYPE_TAGS[match.group(1).upper()], match.start(1), match.end(1)
+
+    phrase = _GRID_PHRASE_RE.search(text)
+    if phrase:
+        return "GRID", phrase.start(), phrase.end()
+    return None
+
+
+def detect_type_tag(text: str) -> str | None:
+    """An explicit SC/MC/SR/MR-style marker, if the line carries one."""
+    found = detect_type_tag_span(text)
+    return found[0] if found else None
 
 
 def matches_routing_keyword(text: str) -> bool:

@@ -39,20 +39,22 @@ _SENTENCE_ENDINGS = (".", "?", ":", ";", "!")
 #: A wrapped fragment is a fragment; a long line is more likely real content.
 MAX_FRAGMENT_CHARS = 120
 
-#: A line wraps because it filled the available width, so a short line is a
-#: heading or a label rather than half an option. "S2_AGE BANDS" is short; the
-#: genuinely wrapped "Buy it instead of another [BRAND] [FORMAT OF INTEREST]"
-#: is not.
-MIN_FRAGMENT_CHARS = 25
+#: A line wraps because it filled the available width, so half an option is
+#: long *for its block* - a heading or a variable name is short. Measured
+#: against the block's own widest line rather than a fixed character count:
+#: an absolute 25 was calibrated against "S2_AGE BANDS" and one long option,
+#: and duly mis-read the first narrow table column it met, where every option
+#: wraps well under 25 characters.
+FRAGMENT_WIDTH_RATIO = 0.5
 
 #: A variable name or an all-caps heading stands alone. Prose does not shout.
 _SHOUTED = re.compile(r"^[A-Z0-9][A-Z0-9 _/&.\-]*$")
 
 
-def _can_continue(line: SourceLine) -> bool:
+def _can_continue(line: SourceLine, min_chars: float) -> bool:
     """Whether this line could be the first half of a wrapped option."""
     text = line.text.strip()
-    if not (MIN_FRAGMENT_CHARS <= len(text) <= MAX_FRAGMENT_CHARS):
+    if not (min_chars <= len(text) <= MAX_FRAGMENT_CHARS):
         return False
     if _SHOUTED.match(text):
         return False
@@ -93,6 +95,12 @@ def merge_wrapped_options(lines: list[SourceLine]) -> list[SourceLine]:
     if len(lines) < 3 or explicit < MIN_CODED_LINES:
         return lines
 
+    # The block's own widest answer line stands in for the width the source
+    # wrapped at. The question's own text is excluded: a long stem would set
+    # the bar above every option under it.
+    widest = max(len(line.text.strip()) for line in lines[1:])
+    min_chars = widest * FRAGMENT_WIDTH_RATIO
+
     merged: list[SourceLine] = []
     skip_next = False
 
@@ -105,7 +113,7 @@ def merge_wrapped_options(lines: list[SourceLine]) -> list[SourceLine]:
         if (
             position > 0
             and following is not None
-            and _can_continue(line)
+            and _can_continue(line, min_chars)
             and _completes(following)
         ):
             merged.append(_join(line, following))
