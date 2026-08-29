@@ -437,3 +437,55 @@ input[type="text"] {
 .question-card.non-question { border-left: 4px solid var(--muted); }
 .quick-card.non-question .qc-title,
 .question-card.non-question .qc-title { color: var(--muted); font-style: italic; }
+
+
+/* -- Phase 14: converting indicator and correction commands ------------- */
+
+.converting { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--muted); }
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+.command-box {
+  border-top: 1px dashed var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.command-input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+.command-actions { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
+.command-state.err { color: var(--flag); }
+.command-state.ok { color: var(--good); }
+
+.command-proposal {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+.command-reason { margin: 0 0 8px; font-style: italic; }
+table.diff { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.diff th, table.diff td { padding: 4px 8px; text-align: left; vertical-align: top; border-top: 1px solid var(--border); }
+table.diff tr:first-child th, table.diff tr:first-child td { border-top: none; }
+table.diff .field { font-weight: 600; white-space: nowrap; }
+table.diff .before { color: var(--flag); text-decoration: line-through; }
+table.diff .after { color: var(--good); }
+table.diff td { white-space: pre-wrap; }

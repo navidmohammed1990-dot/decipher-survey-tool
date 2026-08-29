@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-9, 11 complete. Two entry points over one engine.**
+**Status: Phases 1-9, 11, 14 complete. Phases 10, 12, 13 not started.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -573,6 +573,70 @@ as a column. A single space is not, so `I have lived here 20 years` keeps its 20
 
 ---
 
+## Phase 14 — Waiting, and plain-English corrections
+
+### Knowing it is working
+
+Convert now shows a spinner and a live elapsed counter from the moment it is
+clicked — "Converting… 12s" — cleared when the call resolves or fails. No ETA is
+promised; on a CPU-bound runtime a minute-long wait needs a heartbeat, not a
+prediction. Phase 9B's timing summary still appears afterwards.
+
+### Correcting in words
+
+Each card carries an optional free-text box, labelled as interpreted by AI and
+costing a round-trip. The dropdown and text fields remain the primary,
+**zero-latency** way to correct anything and are untouched — a test asserts the
+structured path never reaches the model.
+
+> "Q1 needs to be converted as a radio question with all the options shown
+> below as radio options."
+
+The instruction plus the question's current state go to a narrow prompt that
+returns a structured edit in `Question` field shape. Only fields the instruction
+mentions may change; option text, titles and codes are never invented.
+
+**Nothing is saved by interpreting.** The proposal is a copy, shown as a
+before/after diff for the programmer to apply or discard, so a misread
+instruction cannot quietly corrupt a question:
+
+| field | before | after |
+|---|---|---|
+| element | checkbox | radio |
+
+An instruction that is ambiguous, unmappable, or would change nothing says so
+plainly rather than guessing.
+
+Confirmed corrections are recorded to a Quick Convert correction library —
+separate from the document flow's, preserving Phase 8's isolation — so both
+correction routes feed the same learning. **Known limitation:** that library is
+in-memory and dies with the server; durable persistence is Phase 10, which is
+not built.
+
+---
+
+## Reference dataset — not yet wired
+
+`reference/question_examples.yaml` holds real input patterns paired with their
+correct classification. **Nothing reads it today.** Phase 12 — the loader and
+regression harness that would consume it — is not implemented. To wire it up:
+
+1. Add `pyyaml` to `requirements.txt` (not currently a dependency).
+2. A loader that parses each entry into an input string plus expected outcome.
+3. A translation layer: the YAML's `expected` shape (`rows`, `comment_tag`,
+   `open`, `randomize_off`) is not the `Question` model's shape, so a mapping is
+   needed to compare them.
+4. A regression test that runs every entry and reports which drift.
+5. Optionally, feeding selected entries into `seed_library.py` as few-shot
+   examples — mindful that each one costs prompt tokens on every call.
+
+Several entries also describe behaviour that does not exist yet (`custom_complex`,
+`excluded`/strikethrough, two-table grids, multi-line wrapped options), so a
+harness run today would fail on them by design.
+
+
+---
+
 ## Project layout
 
 ```
@@ -610,12 +674,13 @@ app/
     corrections.py              Session-level learning from SP edits
     paste.py                    Pasted-text splitting (Quick Convert)
     seed_library.py             Curated examples carried on every call
+    commands.py                 Plain-English correction interpreter
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
   static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          492 tests
+tests/                          515 tests
 ```
 
 ## Configuration
@@ -687,9 +752,11 @@ These are honest boundaries of Phase 1, not defects:
 | 7     | AI-led line classification                   | ✅ done |
 | 8     | Quick Convert (paste entry point)            | ✅ done |
 | 9     | History + performance diagnosis              | ⚠️ A done, B diagnosed |
+| 10    | Multi-line options, flexible labels, persistent library | ❌ not started |
 | 11    | Non-question content detection               | ✅ done |
-| 12    | Validation and QA reporting                  | next   |
-| 13    | Pilot on real questionnaires                 |        |
+| 12    | Reference dataset + regression harness       | ❌ not started |
+| 13    | Real patterns from 6 questionnaires          | ❌ not started |
+| 14    | Loading indicator + plain-English corrections | ✅ done |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.

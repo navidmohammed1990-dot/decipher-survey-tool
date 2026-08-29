@@ -1,0 +1,318 @@
+# question_examples.yaml
+#
+# STATUS: stored here for version control, NOT yet wired into anything.
+# Phase 12 (the loader + regression harness that would consume this) is not
+# implemented — nothing in app/ reads this file today. See the README's
+# "Reference dataset" section for what Phase 12 still needs.
+#
+# Each entry = one real-world input pattern, paired with the correct
+# classification and/or output shape. Used two ways:
+#   1. Few-shot reference for the AI classifier
+#   2. Automated regression test (run every entry, check the result matches)
+#
+# Sources: Standard_Template_Questions_V1_24Aug26.xml (canonical output
+# shapes), plus real questions found across your 6 uploaded questionnaires
+# and the Tasmania test document.
+
+# ---------------------------------------------------------------------------
+# CORE ELEMENT TYPES — one canonical example each, matched exactly to your
+# template file
+# ---------------------------------------------------------------------------
+
+- id: radio_basic
+  category: radio
+  description: Single-select with standard other-specify / none-of-above rows
+  input: |
+    Q1. Dummy SR Question
+    Option 1   1
+    Option 2   2
+    Option 3   3
+    Other (please specify)   91
+    None of the above   99
+  expected:
+    element: radio
+    comment_tag: "${res.SR}"
+    rows:
+      - {label: r1, value: "1", text: "Option 1"}
+      - {label: r2, value: "2", text: "Option 2"}
+      - {label: r3, value: "3", text: "Option 3"}
+      - {label: r91, value: "91", open: true, text: "Other (please specify)"}
+      - {label: r99, value: "99", randomize_off: true, text: "None of the above"}
+
+- id: checkbox_basic
+  category: checkbox
+  description: Multi-select, no value attribute on rows (per template convention)
+  input: |
+    Q2. Dummy MR Question
+    Option 1
+    Option 2
+    Option 3
+    Other (please specify)
+    None of the above
+  expected:
+    element: checkbox
+    comment_tag: "${res.MR}"
+    atleast: "1"
+    rows:
+      - {label: r1, text: "Option 1"}
+      - {label: r2, text: "Option 2"}
+      - {label: r3, text: "Option 3"}
+      - {label: r91, open: true, text: "Other (please specify)"}
+      - {label: r99, exclusive: true, text: "None of the above"}
+
+- id: checkbox_grid_basic
+  category: checkbox_grid
+  description: Clean multi-select grid, rows and cols, no cardsort styling
+  input: |
+    Q3. Dummy MR Question (grid)
+    Rows: Option 1, Option 2, Option 3
+    Cols: 1, 2, 3
+  expected:
+    element: checkbox_grid
+    comment_tag: "${res.MR}"
+    atleast: "1"
+
+- id: textarea_basic
+  category: textarea
+  description: Long open-ended response
+  input: |
+    Q4. Dummy Text Question (long open end)
+  expected:
+    element: textarea
+    comment_tag: "${res.Open}"
+    validate: "CheckBlank(2,LABEL)"
+
+- id: text_basic
+  category: text
+  description: Short open-ended response
+  input: |
+    Q5. Dummy Text Question (short open end)
+  expected:
+    element: text
+    comment_tag: "${res.Open}"
+    validate: "CheckBlank(2,LABEL)"
+
+- id: html_basic
+  category: html
+  description: Descriptive/instructional text, no answer needed
+  input: |
+    [Shown to respondent, no question asked]
+    Thank you. Whilst you are a business owner, in this survey we would
+    like you to focus on how you think, feel, and behave as an individual.
+  expected:
+    element: html
+
+# ---------------------------------------------------------------------------
+# REAL PATTERNS FROM TASMANIA TEST DOC (Phase 6 seed cases)
+# ---------------------------------------------------------------------------
+
+- id: single_select_coded_table
+  category: radio
+  description: Single-select with a coded options table incl. non-sequential-looking code (97)
+  input: |
+    Q1.2. Which of the following best describes your gender identity?
+    Male    1
+    Female  2
+    Other   97
+  expected:
+    element: radio
+    options:
+      - {text: "Male", code: "1"}
+      - {text: "Female", code: "2"}
+      - {text: "Other", code: "97"}
+
+- id: multiselect_with_routing
+  category: checkbox
+  description: Multi-select with a routing tag that must be excluded from output
+  input: |
+    Do you have a current Tasmanian driver's licence for a car?
+    ASK ALL, MC
+    Yes  1
+    No - but I intend to get one within the next 12 months  2
+    No  3
+  expected:
+    element: checkbox
+    routing_notes: ["ASK ALL, MC"]
+
+- id: multiline_wrapped_option
+  category: radio
+  description: An option's text wraps across two physical lines before its code
+  input: |
+    QD24.   If you were to purchase this product, would you...?
+    Buy it instead of another [BRAND] [FORMAT OF INTEREST]
+    product you usually buy 1
+    Buy it instead of a different type of product    3
+  expected:
+    element: radio
+    options:
+      - text: "Buy it instead of another [BRAND] [FORMAT OF INTEREST] product you usually buy"
+        code: "1"
+      - text: "Buy it instead of a different type of product"
+        code: "3"
+
+# ---------------------------------------------------------------------------
+# REAL PATTERNS FROM YOUR 6 QUESTIONNAIRES (Phase 13)
+# ---------------------------------------------------------------------------
+
+- id: programmer_instruction_derived_variable
+  category: not_a_question
+  description: Bracketed instruction to derive a banded variable — not respondent-facing
+  input: |
+    [Please create the following variable for datafile and auto code
+    based on S2 Age]:
+    S2_AGE BANDS
+    Under 18 years  1
+    18 to 24 years  2
+  expected:
+    element: not_a_question
+    reason: "Programmer instruction to derive a variable, not respondent-facing"
+
+- id: type_signal_as_table_header
+  category: radio
+  description: SR/MR appears as an options-table column header, not a routing line
+  input: |
+    S1. What gender do you identify as?
+                        SR
+    Male                1
+    Female              2
+    Non-binary          3
+    Prefer not to say   99
+  expected:
+    element: radio
+    comment_tag: "${res.SR}"
+
+- id: two_table_grid
+  category: radio_grid
+  description: Grid built from two separate tables — scale/cols in one, statements/rows in another
+  input: |
+    P1. For each statement below, please tell us how strongly you agree
+    or disagree that Australia Post...
+    SR PER ROW
+    Strongly Disagree | Disagree | Neither | Agree | Strongly Agree
+    1                  | 2        | 3       | 4     | 5
+    Randomise
+    Delivers parcels quickly              1
+    Delivers parcels on time              2
+    Is affordable for sending parcels     3
+  expected:
+    element: radio_grid
+    rows:
+      - {text: "Delivers parcels quickly", code: "1"}
+      - {text: "Delivers parcels on time", code: "2"}
+      - {text: "Is affordable for sending parcels", code: "3"}
+    cols:
+      - {text: "Strongly Disagree", code: "1"}
+      - {text: "Disagree", code: "2"}
+      - {text: "Neither", code: "3"}
+      - {text: "Agree", code: "4"}
+      - {text: "Strongly Agree", code: "5"}
+
+- id: per_row_routing_column
+  category: radio
+  description: A third table column carries a routing directive for specific rows only
+  input: |
+    D5A. TERMINATE IF UNDER 18 OR 70+
+    HIDDEN VARIABLE CLASSIFICATION
+    17 or younger    1    TERMINATE
+    18-24            2
+    ...
+    70 or older      12   TERMINATE
+  expected:
+    element: radio
+    options:
+      - {text: "17 or younger", code: "1", row_note: "TERMINATE"}
+      - {text: "18-24", code: "2"}
+      - {text: "70 or older", code: "12", row_note: "TERMINATE"}
+
+- id: missing_code_on_one_option
+  category: radio
+  description: Not every option has an explicit code, even when others in the same table do
+  input: |
+    D6. Are you...
+    SR
+    Male     1
+    Female   2
+    Other
+  expected:
+    element: radio
+    options:
+      - {text: "Male", code: "1"}
+      - {text: "Female", code: "2"}
+      - {text: "Other", code: null}   # falls back to sequential numbering
+
+- id: non_sequential_codes_preserved
+  category: radio_grid
+  description: Codes must be preserved exactly, gaps and all (retired rows from earlier waves)
+  input: |
+    Offers unique and thoughtful gifts    17
+    Has Post Offices that provide the products and services I need   18
+  expected:
+    element: radio_grid
+    rows:
+      - {text: "Offers unique and thoughtful gifts", code: "17"}
+      - {text: "Has Post Offices that provide the products and services I need", code: "18"}
+    note: "Codes 15-16 intentionally absent (retired in an earlier wave) — must not be renumbered"
+
+- id: piped_text_in_title
+  category: text
+  description: Dynamic piped text inside a question title must be preserved verbatim
+  input: |
+    P3. Why do you disagree that Australia Post is [PIPE CODE FROM P2]?
+  expected:
+    element: text
+    title: "Why do you disagree that Australia Post is [PIPE CODE FROM P2]?"
+
+- id: strikethrough_excluded
+  category: excluded
+  description: Struck-through (deleted/deprecated) content must not be converted at all
+  input: |
+    ~~MP2. When you buy from marketplace platforms like Temu or Shein,
+    how important is are each of the following in your decision making?~~
+    ~~Low prices / getting the most for my money    1~~
+  expected:
+    element: null
+    excluded: true
+    reason: "Strikethrough formatting indicates deleted/deprecated content"
+
+- id: custom_complex_quiz
+  category: custom_complex
+  description: Gamified task too complex for any standard element type
+  input: |
+    Click on all the images that you recognise the brand that it belongs
+    to -- as quickly as you can -- and then click 'next'. [5 levels,
+    8 images each, scoring, asset randomization from external sheet]
+  expected:
+    element: custom_complex
+    reason: "Multi-level gamified image-recognition task with external
+      asset randomization — requires manual custom scripting"
+
+- id: custom_complex_video_slider
+  category: custom_complex
+  description: Real-time slider synced to video playback
+  input: |
+    We will provide you with a slider underneath the video which you can
+    move left and right as the video plays to show how positive or
+    negative you feel at different points.
+  expected:
+    element: custom_complex
+    reason: "Continuous real-time input synced to video playback —
+      requires manual custom scripting"
+
+# ---------------------------------------------------------------------------
+# OPEN QUESTIONS — shapes found in your template that our generator does
+# NOT yet fully distinguish (see accompanying note)
+# ---------------------------------------------------------------------------
+
+# - radio_grid: your template's only true grid example uses heavy cardsort/
+#   card-rating styling (uses="cardrating.1", custom CSS blocks). Our
+#   generator currently outputs a plain, unstyled grid instead (matching
+#   the checkbox_grid template, which IS plain). Needs a decision — see notes.
+#
+# - select: your template has TWO very different real shapes under this
+#   one element name — sliderpoints (<choice> tags, uses="sliderpoints.3")
+#   and ranksort/ranking (<row>+<choice>, uses="ranksort.7", heavy CSS).
+#   Our generator currently only produces one generic/simplified shape.
+#
+# - radio with cols only, no rows (a rating-scale-style question) — a
+#   distinct pattern from both plain radio and radio_grid, not yet
+#   represented in our element types at all.

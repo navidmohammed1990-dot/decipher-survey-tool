@@ -20,7 +20,9 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api import routes_classify
+from app.classify import commands
 from app.classify.classifier import classify_question
+from app.classify.corrections import Correction, CorrectionMemory
 from app.classify.paste import split_questions
 from app.config import settings
 from app.generate.export import check_well_formed
@@ -35,6 +37,11 @@ router = APIRouter(prefix="/api", tags=["quick"])
 #: questions. A larger paste is a signal to paste less, not for the tool to
 #: start managing batches.
 MAX_PASTE_CHARS = 60_000
+
+#: Corrections made while pasting. Kept separate from the document flow's
+#: memory so a paste and a review in progress cannot contaminate each other,
+#: which is the isolation Quick Convert has had since Phase 8.
+quick_corrections = CorrectionMemory()
 
 
 class QuickConvertRequest(BaseModel):
@@ -104,9 +111,9 @@ def quick_convert(
             block.lines,
             client,
             review_threshold,
-            # Opt out of the DOCX session's corrections: they belong to that
-            # document, not to an unrelated paste.
-            system_prefix="",
+            # The document flow's corrections belong to that document, not to
+            # an unrelated paste. Quick Convert carries only its own.
+            system_prefix=quick_corrections.prompt_prefix(),
         )
         questions.append(outcome.question)
         fallback_count += 1 if outcome.used_fallback else 0
@@ -177,3 +184,90 @@ def _render(questions: list[Question]) -> tuple[str, bool, str | None]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result = check_well_formed(xml)
     return xml, result.ok, result.error
+
+
+# -- natural-language corrections -----------------------------------------
+
+
+class CommandRequest(BaseModel):
+    question: Question
+    instruction: str
+
+
+class CommandResponse(BaseModel):
+    understood: bool = False
+    reason: str = ""
+    question: Question | None = None
+    changes: list[dict] = Field(default_factory=list)
+
+
+@router.post("/quick-command", response_model=CommandResponse)
+def quick_command(request: CommandRequest) -> CommandResponse:
+    """Interpret one plain-English correction into a proposed edit.
+
+    Proposes only: nothing is saved here. The programmer sees what changed and
+    confirms, so a misread instruction cannot quietly corrupt a question.
+    """
+    if not request.instruction.strip():
+        raise HTTPException(status_code=400, detail="Type an instruction first.")
+
+    result = commands.interpret(request.question, request.instruction, routes_classify.build_client())
+    return CommandResponse(
+        understood=result.understood,
+        reason=result.reason or (commands.UNCLEAR_MESSAGE if not result.understood else ""),
+        question=result.question,
+        changes=result.changes,
+    )
+
+
+class ConfirmCommandRequest(BaseModel):
+    before: Question
+    after: Question
+    instruction: str = ""
+
+
+@router.post("/quick-command/confirm", response_model=QuickConvertResponse)
+def confirm_command(request: ConfirmCommandRequest) -> QuickConvertResponse:
+    """Record a confirmed correction so later classifications learn from it.
+
+    Both correction routes — the dropdowns and this one — feed the same
+    library, rather than being tracked separately.
+    """
+    # A question edited by hand may carry no trace of what the model was shown.
+    # Its own content is the next best example text; without any, the
+    # correction is not meaningful enough to teach from.
+    original_lines = list(request.before.trace.lines) if request.before.trace else []
+    if not original_lines:
+        original_lines = [
+            line for line in
+            [request.before.title_text(), *[o.raw_text for o in request.before.options]]
+            if line
+        ]
+
+    quick_corrections.record(
+        Correction(
+            label=request.after.label,
+            original_lines=original_lines,
+            ai_said={
+                "element": request.before.element,
+                "options": [o.raw_text for o in request.before.options],
+            },
+            sp_corrected_to={
+                "element": request.after.element,
+                "options": [o.raw_text for o in request.after.options],
+                "instruction": request.instruction.strip(),
+            },
+        )
+    )
+
+    xml, well_formed, error = _render([request.after])
+    return QuickConvertResponse(
+        questions=[request.after], xml=xml, well_formed=well_formed, error=error
+    )
+
+
+@router.get("/quick-corrections", tags=["meta"])
+def list_quick_corrections() -> dict:
+    """Corrections carried into later pastes in this session."""
+    recorded = quick_corrections.recent()
+    return {"count": len(recorded), "corrections": [c.model_dump() for c in recorded]}

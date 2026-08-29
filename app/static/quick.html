@@ -39,6 +39,10 @@ Other, please specify"></textarea>
       <div class="pane-actions">
         <button id="convert-btn" class="primary">Convert</button>
         <span class="muted kbd-hint">Ctrl+Enter</span>
+        <span id="converting" class="converting" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="converting-text">Converting…</span>
+        </span>
         <span id="quick-status" class="muted" role="status" aria-live="polite"></span>
       </div>
     </div>
@@ -131,6 +135,26 @@ Other, please specify"></textarea>
       </div>
       <label>Routing notes <span class="muted">(never exported)</span>
         <textarea data-field="routing_notes" rows="2"></textarea></label>
+
+      <div class="command-box">
+        <label>Or describe the correction
+          <span class="muted">— interpreted by AI, review before saving; costs a round-trip</span>
+          <input type="text" class="command-input"
+                 placeholder="e.g. make this a radio with the options shown below">
+        </label>
+        <div class="command-actions">
+          <button class="command-run ghost">Interpret</button>
+          <span class="command-state muted"></span>
+        </div>
+        <div class="command-proposal" hidden>
+          <p class="command-reason muted"></p>
+          <table class="diff"><tbody></tbody></table>
+          <div class="command-actions">
+            <button class="command-accept primary">Apply this change</button>
+            <button class="command-reject ghost">Discard</button>
+          </div>
+        </div>
+      </div>
     </div>
   </article>
 </template>

@@ -49,7 +49,8 @@ async function convert() {
 
   converting = true;
   $("convert-btn").disabled = true;
-  setStatus("Converting…");
+  setStatus("");
+  startConverting();
 
   try {
     const body = await jsonOrThrow(
@@ -71,9 +72,33 @@ async function convert() {
   } catch (error) {
     setStatus(error.message, true);
   } finally {
+    stopConverting();
     converting = false;
     $("convert-btn").disabled = false;
   }
+}
+
+/* A conversion can run for a minute on CPU inference, so the wait needs a
+   visible heartbeat. No ETA is promised — the point is showing it is alive. */
+let convertTimer = null;
+
+function startConverting() {
+  const started = Date.now();
+  const panel = $("converting");
+  const text = $("converting-text");
+  panel.hidden = false;
+  text.textContent = "Converting… 0s";
+
+  clearInterval(convertTimer);
+  convertTimer = setInterval(() => {
+    text.textContent = `Converting… ${Math.round((Date.now() - started) / 1000)}s`;
+  }, 1000);
+}
+
+function stopConverting() {
+  clearInterval(convertTimer);
+  convertTimer = null;
+  $("converting").hidden = true;
 }
 
 /** Re-generate from the edited questions — no second model call. */
@@ -223,10 +248,12 @@ function card(question, position) {
   if (question.needs_review) open(body, toggle, true);
   toggle.addEventListener("click", () => open(body, toggle, body.hidden));
 
-  // Any edit updates the model and repaints the XML pane.
+  // Any edit updates the model and repaints the XML pane. The command input
+  // is excluded: it is interpreted on demand, not on every keystroke.
   root.querySelectorAll("textarea, select").forEach((control) => {
     control.addEventListener("change", () => commit(root));
   });
+  wireCommandBox(root);
   return node;
 }
 
@@ -549,3 +576,121 @@ function showTimings(timings) {
 }
 
 loadHistory();
+
+
+/* -- natural-language corrections ---------------------------------------
+
+   Additive by design: the dropdown and text fields above stay the primary,
+   zero-latency way to fix anything. This costs a model round trip, so it is
+   opt-in and always shows what it would change before anything is saved. */
+
+function wireCommandBox(root) {
+  const input = root.querySelector(".command-input");
+  const proposal = root.querySelector(".command-proposal");
+  const state = root.querySelector(".command-state");
+  let pending = null;
+
+  const setState = (message, kind = "") => {
+    state.className = `command-state muted ${kind}`.trim();
+    state.textContent = message;
+  };
+
+  async function run() {
+    const instruction = input.value.trim();
+    if (!instruction) return;
+
+    const position = Number(root.dataset.position);
+    const question = questions[position];
+    if (!question) return;
+
+    proposal.hidden = true;
+    pending = null;
+    setState("Interpreting…");
+
+    try {
+      const body = await jsonOrThrow(
+        await fetch("/api/quick-command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, instruction }),
+        })
+      );
+
+      if (!body.understood) {
+        // Never guess: an unclear instruction says so and points at the fields.
+        setState(body.reason || "Not sure what you meant, please use the fields below.", "err");
+        return;
+      }
+
+      pending = body;
+      setState("");
+      renderProposal(root, body);
+      proposal.hidden = false;
+    } catch (error) {
+      setState(error.message, "err");
+    }
+  }
+
+  root.querySelector(".command-run").addEventListener("click", run);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      run();
+    }
+  });
+
+  root.querySelector(".command-reject").addEventListener("click", () => {
+    pending = null;
+    proposal.hidden = true;
+    setState("Discarded.");
+  });
+
+  root.querySelector(".command-accept").addEventListener("click", async () => {
+    if (!pending) return;
+    const position = Number(root.dataset.position);
+    const before = questions[position];
+
+    questions[position] = pending.question;
+    proposal.hidden = true;
+    input.value = "";
+    setState("Applied.", "ok");
+
+    try {
+      // Recorded so both correction routes feed the same library.
+      await fetch("/api/quick-command/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ before, after: pending.question, instruction: pending.instruction || "" }),
+      });
+    } catch {
+      // Recording is best effort; the edit itself already stands.
+    }
+
+    pending = null;
+    renderCards();
+    regenerate();
+  });
+}
+
+function renderProposal(root, body) {
+  root.querySelector(".command-reason").textContent = body.reason || "";
+
+  const rows = (body.changes || []).map((change) => {
+    const tr = document.createElement("tr");
+    const field = document.createElement("th");
+    field.className = "field";
+    field.textContent = change.field;
+
+    const before = document.createElement("td");
+    before.className = "before";
+    before.textContent = change.before || "(empty)";
+
+    const after = document.createElement("td");
+    after.className = "after";
+    after.textContent = change.after || "(empty)";
+
+    tr.append(field, before, after);
+    return tr;
+  });
+  root.querySelector(".diff tbody").replaceChildren(...rows);
+}
