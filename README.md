@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-11 and 14 complete. Phases 12 and 13 not started.**
+**Status: Phases 1-14 complete.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -642,6 +642,74 @@ as a column. A single space is not, so `I have lived here 20 years` keeps its 20
 
 ---
 
+## Phase 13 — Patterns from real questionnaires
+
+Four shapes the six uploaded questionnaires use that the tool could not read.
+
+**Strikethrough is deletion.** `w:strike` and `w:dstrike` are captured from the
+DOCX alongside bold and italic, and `~~text~~` is read from a paste — including
+spans that open and close on different lines, which is what happens when struck
+text wraps. A block struck through in its entirety classifies as `excluded`
+**with no model call at all**: formatting is not a judgment, and skipping the
+call is time saved.
+
+**SR and MR are type signals.** They join SC/MC/OE/NUM/GRID, along with the
+`SR PER ROW` / `MR PER ROW` grid forms. Matching is case-sensitive on purpose —
+loose matching reads the `Mr` in `Mr. Smith` as a signal.
+
+**A scale packed onto one line becomes columns.** The classifier addresses
+lines by index and may not rewrite them, so five scale points on a single line
+could never become five columns. They are split, and paired with their codes
+when the next line carries them:
+
+```
+Strongly Disagree | Disagree | Neither | Agree | Strongly Agree
+1                 | 2        | 3       | 4     | 5
+```
+
+**A third column can carry a per-row directive.** `17 or younger  1  TERMINATE`
+parses to text, code and `row_note` — programmer-facing like routing notes, and
+never emitted.
+
+### Two more outcomes that generate nothing
+
+`custom_complex` for a real respondent task no element can express (a gamified
+image quiz, a slider synced to video); `excluded` for struck content. With
+`not_a_question` these make three, and the generator emits nothing for any of
+them rather than an approximation.
+
+### A row-numbering collision, fixed
+
+Sequential fallback did not step over codes the source had already claimed, so
+`Male | 1`, `Female | 2`, `Other` produced **r1, r2, r1** — two rows sharing one
+identity. The counter now skips claimed suffixes: r1, r2, r3.
+
+---
+
+## Phase 12 — The reference dataset as a regression suite
+
+`reference/question_examples.yaml` is loaded by `app/dataset.py` and run by
+`tests/test_dataset_regression.py`.
+
+Each entry is checked on what is verifiable **without a live model**: that the
+parser recovers every expected option text and code, and that the generator
+turns those into the labels and attributes the template calls for. Which
+*element* the model picks is judgment and needs a real runtime, so it is
+reported rather than faked.
+
+**18 of 19 entries pass.** The one that does not is listed in
+`EXPECTED_FAILURES` with its reason, so the rest guard against regression now:
+
+| Entry | Why |
+|---|---|
+| `checkbox_grid_basic` | Dataset expects `${res.MR}`; the Phase 5 addendum maps `checkbox_grid` to `${res.MRStatement}`. A specification conflict, not a code defect — one of the two needs correcting. |
+
+An entry that starts passing while still listed fails the suite, so the notes
+cannot go stale.
+
+
+---
+
 ## Phase 14 — Waiting, and plain-English corrections
 
 ### Knowing it is working
@@ -749,9 +817,10 @@ app/
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
+  dataset.py                    Reference dataset loader and checks
   static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          596 tests
+tests/                          627 tests
 ```
 
 ## Configuration
@@ -825,8 +894,8 @@ These are honest boundaries of Phase 1, not defects:
 | 9     | History + performance diagnosis              | ⚠️ A done, B diagnosed |
 | 10    | Multi-line options, flexible labels, persistent library | ✅ done |
 | 11    | Non-question content detection               | ✅ done |
-| 12    | Reference dataset + regression harness       | ❌ not started |
-| 13    | Real patterns from 6 questionnaires          | ❌ not started |
+| 12    | Reference dataset + regression harness       | ✅ done |
+| 13    | Real patterns from 6 questionnaires          | ✅ done |
 | 14    | Loading indicator + plain-English corrections | ✅ done |
 
 > AI should understand the questionnaire. Deterministic code should control the

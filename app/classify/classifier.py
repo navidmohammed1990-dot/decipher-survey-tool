@@ -21,6 +21,8 @@ from app.classify.ollama import OllamaClient, OllamaError
 from app.models.document import ParsedDocument, TextRun
 from app.generate.resources import DEFAULT_SUBJECT_TYPE, SUBJECT_TYPES, resource_tag_for
 from app.models.survey import (
+    EXCLUDED_ELEMENTS,
+    NO_XML_ELEMENTS,
     NON_QUESTION_ELEMENTS,
     ClassificationTrace,
     GRID_ELEMENTS,
@@ -48,7 +50,11 @@ ROLE_KEYS = (
 #: Which element a house type marker implies, when options are present.
 TYPE_TAG_ELEMENTS = {
     "SC": {"radio", "select"},
+    "SR": {"radio", "select"},
     "MC": {"checkbox"},
+    "MR": {"checkbox"},
+    "SR_GRID": {"radio_grid"},
+    "MR_GRID": {"checkbox_grid"},
     "OE": {"textarea", "text"},
     "NUM": {"number"},
     "GRID": {"radio_grid", "checkbox_grid"},
@@ -78,7 +84,11 @@ usually introduces the NEXT question - classify it as routing and do not use
 it as this question's type signal.
 
 Then decide the element type: radio, checkbox, radio_grid, checkbox_grid,
-textarea, text, number, select, html, not_a_question.
+textarea, text, number, select, html, not_a_question, custom_complex.
+
+Choose custom_complex for a real respondent task no standard element can
+express - a gamified image quiz, a slider synced to video playback, anything
+needing bespoke scripting. Saying so is more useful than a wrong approximation.
 
 Choose not_a_question when the WHOLE block speaks to the programmer, not the
 respondent - a derived-variable definition, a coding instruction. Evidence,
@@ -251,7 +261,7 @@ def interpret_response(
         for index in picks["routing_lines"] + picks["type_signal_lines"]
     ]
 
-    if element in NON_QUESTION_ELEMENTS:
+    if element in NO_XML_ELEMENTS:
         # The whole block is programmer content. Keep every line verbatim for
         # reference and build nothing: no title, no options, no row numbering.
         return _non_question_outcome(label, element, lines, confidence, notes_text)
@@ -463,6 +473,22 @@ def classify_question(
             ),
             used_fallback=True,
             warnings=["No content found for this question."],
+        )
+
+    if lines and all(line.features.is_struck for line in lines):
+        # Struck content is deleted content. That is formatting, not a judgment
+        # call, so it needs no model call — and skipping one is time saved.
+        return ClassificationOutcome(
+            question=Question(
+                label=label,
+                element="excluded",
+                confidence=1.0,
+                needs_review=False,
+                ai_notes="Struck through in the source, so treated as deleted "
+                         "and not converted.",
+                routing_notes=[line.text for line in lines],
+                trace=ClassificationTrace(lines=[line.text for line in lines]),
+            )
         )
 
     try:

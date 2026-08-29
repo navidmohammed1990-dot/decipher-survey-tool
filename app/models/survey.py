@@ -17,6 +17,9 @@ from app.models.document import TextRun  # re-exported: one run type across all 
 __all__ = [
     "SUPPORTED_ELEMENTS",
     "NON_QUESTION_ELEMENTS",
+    "CUSTOM_ELEMENTS",
+    "EXCLUDED_ELEMENTS",
+    "NO_XML_ELEMENTS",
     "SubjectType",
     "TextRun",
     "OptionLine",
@@ -38,6 +41,8 @@ SUPPORTED_ELEMENTS: tuple[str, ...] = (
     "select",
     "html",
     "not_a_question",
+    "custom_complex",
+    "excluded",
 )
 
 #: Elements that describe no respondent-facing question at all. A programmer
@@ -45,6 +50,17 @@ SUPPORTED_ELEMENTS: tuple[str, ...] = (
 #: note, except that it is the *whole* block rather than one line inside a
 #: real question. Nothing here is ever given a question shape.
 NON_QUESTION_ELEMENTS = frozenset({"not_a_question"})
+
+#: A real question the tool cannot express: a gamified task, a slider synced to
+#: video. Recognising it and saying so beats emitting a wrong approximation.
+CUSTOM_ELEMENTS = frozenset({"custom_complex"})
+
+#: Content struck through in the source. Deleted, so never converted.
+EXCLUDED_ELEMENTS = frozenset({"excluded"})
+
+#: Everything that yields no XML, for whatever reason. The generator cares only
+#: that nothing is emitted; the distinction matters to the person reading it.
+NO_XML_ELEMENTS = NON_QUESTION_ELEMENTS | CUSTOM_ELEMENTS | EXCLUDED_ELEMENTS
 
 #: Elements whose answer list lives in ``options``.
 OPTION_ELEMENTS = frozenset({"radio", "checkbox", "select"})
@@ -74,6 +90,11 @@ class OptionLine(BaseModel):
     Preserved verbatim rather than renumbered: 97 for Other and 99 for None are
     a house convention that carries meaning into the data tables.
     """
+    row_note: str | None = None
+    """A directive attached to this row alone, e.g. TERMINATE on an age band.
+
+    Programmer-facing, like routing_notes: shown for reference, never emitted.
+    """
 
     @classmethod
     def from_runs(cls, runs: list[TextRun], text: str | None = None) -> OptionLine:
@@ -90,7 +111,14 @@ class OptionLine(BaseModel):
 
     @classmethod
     def from_text(cls, text: str) -> OptionLine:
-        """Build from a plain line, splitting off any source-provided code."""
+        """Build from a plain line, splitting off code and any per-row note.
+
+        A three-column row reads as text | code | note, which is how a
+        questionnaire writes "17 or younger  1  TERMINATE".
+        """
+        cells = [cell.strip() for cell in text.split("|")]
+        if len(cells) == 3 and cells[1].isdigit() and cells[2]:
+            return cls(raw_text=cells[0], code=cells[1], row_note=cells[2])
         return cls(raw_text=strip_code(text), code=code_of(text))
 
 
@@ -147,6 +175,10 @@ class Question(BaseModel):
     def is_question(self) -> bool:
         """False when this block is programmer content, not a question."""
         return self.element not in NON_QUESTION_ELEMENTS
+
+    @property
+    def generates_xml(self) -> bool:
+        return self.element not in NO_XML_ELEMENTS
 
 
 class QuestionDraft(BaseModel):

@@ -14,7 +14,7 @@ from docx.text.run import Run
 from app.models.document import TextRun
 
 #: Attributes of ``docx.text.run.Font`` we resolve, mapped to run element tags.
-_FORMAT_ATTRS = {"bold": "w:b", "italic": "w:i", "underline": "w:u"}
+_FORMAT_ATTRS = {"bold": "w:b", "italic": "w:i", "underline": "w:u", "strike": "w:strike"}
 
 #: Word writes "auto" when a run follows the document default colour.
 _AUTO_COLOR = "auto"
@@ -158,7 +158,19 @@ def resolve_run_format(
             value = _coerce_underline(value)
         resolved[attr] = bool(value)
 
+    # Word writes double strikethrough as its own element, and it means the
+    # same thing to us: the author deleted this.
+    if not resolved["strike"] and _double_struck(run):
+        resolved["strike"] = True
+
     return resolved
+
+
+def _double_struck(run) -> bool:
+    try:
+        return bool(run.font.double_strike)
+    except AttributeError:  # pragma: no cover - older python-docx
+        return False
 
 
 def merge_runs(runs: list[TextRun]) -> list[TextRun]:

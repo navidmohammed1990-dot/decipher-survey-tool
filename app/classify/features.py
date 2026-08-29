@@ -67,15 +67,21 @@ _ROUTING_RE = re.compile(
 TYPE_TAGS = {
     "SC": "SC",
     "MC": "MC",
+    "SR": "SR",
+    "MR": "MR",
     "OE": "OE",
     "NUM": "NUM",
     "GRID": "GRID",
 }
 
+#: Case-sensitive on purpose. These markers are written in capitals, and
+#: matching loosely would read the "Mr" in "Mr. Smith" as a type signal.
 _TYPE_TAG_RE = re.compile(
-    r"(?:^|[,;:\-\s\[\(])(" + "|".join(TYPE_TAGS) + r")(?:$|[,;:\-\s\]\)])",
-    re.IGNORECASE,
+    r"(?:^|[,;:\-\s\[\(])(" + "|".join(TYPE_TAGS) + r")(?:$|[,;:\-\s\]\)])"
 )
+
+#: "SR PER ROW" / "MR PER ROW" mark a grid: one response per statement.
+_PER_ROW_RE = re.compile(r"\b(SR|MR)\s+PER\s+ROW\b")
 
 #: A code the source gave an option, e.g. "Male | 1", "Other (97)", "None [99]".
 _TRAILING_CODE_RE = re.compile(
@@ -106,6 +112,7 @@ class LineFeatures(BaseModel):
     has_leading_enumeration: bool = False
     is_table_row: bool = False
     is_bold: bool = False
+    is_struck: bool = False
     is_colored: bool = False
     color_hint: str | None = None
     trailing_numeric_code: str | None = None
@@ -122,6 +129,8 @@ class LineFeatures(BaseModel):
             parts.append("is_table_row=true")
         if self.is_bold:
             parts.append("is_bold=true")
+        if self.is_struck:
+            parts.append("is_struck=true")
         if self.is_colored:
             parts.append(f"color_hint={self.color_hint or 'other'}")
         if self.trailing_numeric_code:
@@ -174,7 +183,11 @@ def strip_trailing_code(text: str) -> str:
 
 
 def detect_type_tag(text: str) -> str | None:
-    """An explicit SC/MC/OE-style marker, if the line carries one."""
+    """An explicit SC/MC/SR/MR-style marker, if the line carries one."""
+    per_row = _PER_ROW_RE.search(text)
+    if per_row:
+        return f"{per_row.group(1)}_GRID"
+
     match = _TYPE_TAG_RE.search(text)
     return TYPE_TAGS[match.group(1).upper()] if match else None
 
@@ -198,6 +211,7 @@ def extract_features(
         has_leading_enumeration=detect_literal_marker(text) is not None,
         is_table_row=is_table_row,
         is_bold=bool(meaningful) and all(run.bold for run in meaningful),
+        is_struck=bool(meaningful) and all(run.strike for run in meaningful),
         is_colored=hint is not None,
         color_hint=hint,
         trailing_numeric_code=detect_trailing_code(text),

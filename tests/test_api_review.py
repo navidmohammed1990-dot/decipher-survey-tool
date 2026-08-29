@@ -126,7 +126,8 @@ def test_editing_a_title_replaces_its_formatting(client):
     """Retyped text is plain: reapplying old bold to new words would be worse."""
     body = patch(client, "Q5", title="Plain replacement").json()
     assert body["title"] == [{"text": "Plain replacement", "bold": False,
-                              "italic": False, "underline": False, "color": None}]
+                              "italic": False, "underline": False,
+                              "strike": False, "color": None}]
 
 
 def test_unknown_element_is_rejected_with_a_helpful_message(client):

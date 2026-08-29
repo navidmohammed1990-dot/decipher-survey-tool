@@ -24,6 +24,8 @@ class TextRun(BaseModel):
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    strike: bool = False
+    """Struck through in the source: content the author deleted."""
     color: str | None = None
     """Font colour as an uppercase hex string, e.g. ``FF0000``.
 
@@ -32,8 +34,8 @@ class TextRun(BaseModel):
     even though it never reaches the generated XML.
     """
 
-    def formatting_key(self) -> tuple[bool, bool, bool, str | None]:
-        return (self.bold, self.italic, self.underline, self.color)
+    def formatting_key(self) -> tuple[bool, bool, bool, bool, str | None]:
+        return (self.bold, self.italic, self.underline, self.strike, self.color)
 
 
 class ListInfo(BaseModel):

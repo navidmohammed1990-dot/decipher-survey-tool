@@ -87,9 +87,20 @@ def test_prompt_numbers_every_line(q5_lines):
         assert f"{line.index}: " in prompt
 
 
-def test_system_prompt_lists_every_supported_element():
+def test_system_prompt_lists_every_element_the_model_may_choose():
+    """"excluded" is deliberately absent.
+
+    Strikethrough is formatting, not a judgment, so that outcome is decided
+    deterministically before any model call — offering it as a choice would
+    invite the model to guess at it.
+    """
+    from app.models.survey import EXCLUDED_ELEMENTS
+
     for element in SUPPORTED_ELEMENTS:
-        assert element in SYSTEM_PROMPT
+        if element in EXCLUDED_ELEMENTS:
+            assert element not in SYSTEM_PROMPT
+        else:
+            assert element in SYSTEM_PROMPT
 
 
 # -- index mapping --------------------------------------------------------

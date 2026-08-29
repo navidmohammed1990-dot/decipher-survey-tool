@@ -60,6 +60,11 @@ def _can_continue(line: SourceLine) -> bool:
         return False
     if line.features.trailing_numeric_code or line.features.has_leading_enumeration:
         return False
+    if "|" in text:
+        # Normalisation only inserts a pipe where it found columns, so this
+        # line already has structure — a code, a per-row note — and is
+        # therefore complete rather than half of something.
+        return False
     # Programmer notes and type markers stand alone.
     return not (line.features.matches_routing_keyword or line.features.matches_type_tag_pattern)
 

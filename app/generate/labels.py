@@ -66,6 +66,11 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
     labelled: list[LabelledLine] = []
     counter = 0
 
+    # Suffixes the source already claimed. Sequential numbering has to step
+    # over them: a coded "Male | 1" beside an uncoded "Other" was handing both
+    # the label r1, which is two rows with the same identity.
+    claimed = {code for code in (_explicit_code(option) for option in options) if code}
+
     for option in options:
         text = option.raw_text
         attrs: dict[str, str] = {}
@@ -93,6 +98,8 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
             suffix = NONE_LABEL_SUFFIX
         else:
             counter += 1
+            while counter in claimed:
+                counter += 1
             suffix = counter
 
         labelled.append(
@@ -110,6 +117,7 @@ def label_cols(options: list[OptionLine]) -> list[LabelledLine]:
     """
     labelled: list[LabelledLine] = []
     counter = 0
+    claimed = {code for code in (_explicit_code(option) for option in options) if code}
     for option in options:
         attrs = dict(OPEN_ATTRS) if is_other_specify(option.raw_text) else {}
         explicit = _explicit_code(option)
@@ -117,6 +125,8 @@ def label_cols(options: list[OptionLine]) -> list[LabelledLine]:
             suffix = explicit
         else:
             counter += 1
+            while counter in claimed:
+                counter += 1
             suffix = counter
         labelled.append(
             LabelledLine(option=option, label=f"c{suffix}", suffix=suffix, attrs=attrs)

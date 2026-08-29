@@ -19,7 +19,7 @@ from app.generate.resources import (
     resource_tag_for,
 )
 from app.generate.text import clean, option_markup, runs_to_markup
-from app.models.survey import NON_QUESTION_ELEMENTS, SUPPORTED_ELEMENTS, Question
+from app.models.survey import NO_XML_ELEMENTS, SUPPORTED_ELEMENTS, Question
 
 INDENT = "  "
 SUSPEND = "<suspend/>"
@@ -109,7 +109,7 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
     "html": ElementSpec(tag="html", attrs={"where": "survey"}),
 }
 
-assert set(ELEMENT_SPECS) | NON_QUESTION_ELEMENTS == set(SUPPORTED_ELEMENTS), (
+assert set(ELEMENT_SPECS) | NO_XML_ELEMENTS == set(SUPPORTED_ELEMENTS), (
     "every element either has an XML shape or is explicitly non-question"
 )
 
@@ -176,9 +176,9 @@ def generate_question(question: Question) -> str:
     Namespace prefixes (``atm1d:``, ``ss:``) are used but not declared — they
     belong on the survey root, not on every element.
     """
-    if question.element in NON_QUESTION_ELEMENTS:
-        # Deliberately empty: forcing programmer content into an element shape
-        # is what produced a one-row radio from an eight-band variable spec.
+    if question.element in NO_XML_ELEMENTS:
+        # Deliberately empty: forcing content into an element shape it does not
+        # fit is what produced a one-row radio from an eight-band variable spec.
         return ""
 
     if question.element not in ELEMENT_SPECS:
@@ -222,7 +222,7 @@ def generate_fragment(question: Question) -> str:
 
     Empty for non-question content, which contributes nothing to the survey.
     """
-    if question.element in NON_QUESTION_ELEMENTS:
+    if question.element in NO_XML_ELEMENTS:
         return ""
     return f"{generate_question(question)}\n\n{SUSPEND}"
 
@@ -236,6 +236,6 @@ def generate_questions(questions: list[Question]) -> str:
     fragments = [
         generate_fragment(question)
         for question in questions
-        if question.element not in NON_QUESTION_ELEMENTS
+        if question.element not in NO_XML_ELEMENTS
     ]
     return "\n\n".join(fragment for fragment in fragments if fragment)

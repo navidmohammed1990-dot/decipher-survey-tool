@@ -47,8 +47,10 @@ _FLAT_TAGS = {
     "select": "Ranking",
     # html takes no comment at all.
     "html": None,
-    # Programmer content is never rendered, so it has no comment either.
+    # None of these are rendered, so none carries a comment.
     "not_a_question": None,
+    "custom_complex": None,
+    "excluded": None,
     # No dedicated numeric snippet exists in the template, so numeric entry
     # shares the open-response wording. SR was plainly wrong: it is
     # single-response radio wording on a free-entry field.

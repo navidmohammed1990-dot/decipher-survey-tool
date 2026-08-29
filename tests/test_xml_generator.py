@@ -164,12 +164,17 @@ def test_columns_still_take_open_handling_for_other_specify():
 # -- element shapes -------------------------------------------------------
 
 
-def test_every_element_either_has_a_spec_or_is_non_question():
-    """not_a_question deliberately has no XML shape — it renders nothing."""
-    from app.models.survey import NON_QUESTION_ELEMENTS
+def test_every_element_either_has_a_spec_or_renders_nothing():
+    """Three outcomes deliberately have no XML shape.
 
-    assert set(ELEMENT_SPECS) | NON_QUESTION_ELEMENTS == set(SUPPORTED_ELEMENTS)
-    assert set(ELEMENT_SPECS).isdisjoint(NON_QUESTION_ELEMENTS)
+    not_a_question is programmer content, custom_complex needs bespoke
+    scripting, and excluded was struck through in the source. Each renders
+    nothing rather than an approximation.
+    """
+    from app.models.survey import NO_XML_ELEMENTS
+
+    assert set(ELEMENT_SPECS) | NO_XML_ELEMENTS == set(SUPPORTED_ELEMENTS)
+    assert set(ELEMENT_SPECS).isdisjoint(NO_XML_ELEMENTS)
 
 
 def test_radio_matches_the_canonical_attribute_set():

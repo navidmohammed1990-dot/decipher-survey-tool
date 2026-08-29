@@ -1,9 +1,9 @@
 # question_examples.yaml
 #
-# STATUS: stored here for version control, NOT yet wired into anything.
-# Phase 12 (the loader + regression harness that would consume this) is not
-# implemented — nothing in app/ reads this file today. See the README's
-# "Reference dataset" section for what Phase 12 still needs.
+# Loaded by app/dataset.py and run as a regression suite by
+# tests/test_dataset_regression.py. Entries that cannot pass yet are listed in
+# EXPECTED_FAILURES there with a reason, so the rest guard against regression
+# today rather than waiting for full coverage.
 #
 # Each entry = one real-world input pattern, paired with the correct
 # classification and/or output shape. Used two ways:
@@ -64,13 +64,25 @@
   category: checkbox_grid
   description: Clean multi-select grid, rows and cols, no cardsort styling
   input: |
-    Q3. Dummy MR Question (grid)
-    Rows: Option 1, Option 2, Option 3
-    Cols: 1, 2, 3
+    Q3. Which of the following do you use for each activity? Please
+    select all that apply.
+    MR PER ROW
+    Email | Text message | Phone call
+    Booking a service         1
+    Getting a quote           2
+    Following up an enquiry   3
   expected:
     element: checkbox_grid
     comment_tag: "${res.MR}"
     atleast: "1"
+    rows:
+      - {text: "Booking a service", code: "1"}
+      - {text: "Getting a quote", code: "2"}
+      - {text: "Following up an enquiry", code: "3"}
+    cols:
+      - {text: "Email"}
+      - {text: "Text message"}
+      - {text: "Phone call"}
 
 - id: textarea_basic
   category: textarea
