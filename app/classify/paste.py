@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.classify.features import extract_features
 from app.classify.lines import SourceLine
+from app.classify.wrapping import merge_wrapped_options
 from app.models.document import TextRun
 from app.parsing.normalize import collapse_whitespace, literal_marker_span
 from app.parsing.question_boundaries import BoundaryConfig, match_question_label
@@ -144,7 +145,9 @@ def split_questions(
             PastedQuestion(
                 label=DEFAULT_LABEL,
                 synthesised_label=True,
-                lines=[_build_line(index, line) for index, line in enumerate(lines)],
+                lines=merge_wrapped_options(
+                    [_build_line(index, line) for index, line in enumerate(lines)]
+                ),
             )
         ], warnings
 
@@ -169,7 +172,9 @@ def split_questions(
             PastedQuestion(
                 label=label,
                 raw_label=raw,
-                lines=[_build_line(index, line) for index, line in enumerate(block)],
+                lines=merge_wrapped_options(
+                    [_build_line(index, line) for index, line in enumerate(block)]
+                ),
             )
         )
 

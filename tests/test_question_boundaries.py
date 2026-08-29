@@ -37,7 +37,6 @@ def labels_of(blocks, config=None):
         ("Q10a. A sub-question", "Q10A"),
         ("Q5_1. A sub-question", "Q5_1"),
         ("D3. Demographic", "D3"),
-        ("Q 12. Space before the number", "Q12"),
     ],
 )
 def test_recognises_common_label_styles(text, expected):
@@ -45,8 +44,29 @@ def test_recognises_common_label_styles(text, expected):
 
 
 @pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("QD24. Wrapped-option question", "QD24"),
+        ("P1. Agreement battery", "P1"),
+        ("MP2. Marketplace question", "MP2"),
+        ("QZ5. Late-alphabet prefix", "QZ5"),
+        ("APP1. Three-letter prefix", "APP1"),
+    ],
+)
+def test_recognises_house_styles_no_whitelist_would_have_covered(text, expected):
+    """The point of the shape-based matcher: unseen prefixes still work."""
+    assert labels_of([block(0, text)]) == [expected]
+
+
+@pytest.mark.parametrize(
     "text",
     [
+        "Yes 1.",
+        "No 2.",
+        "Male 1",
+        "S2_AGE BANDS",
+        "COVID19: impact on your business",
+        "Section D. Demographics",
         "Brand A",
         "Please select all that apply.",
         "None of these",
@@ -56,6 +76,17 @@ def test_recognises_common_label_styles(text, expected):
     ],
 )
 def test_ignores_text_that_is_not_a_label(text):
+    """A shape-based matcher must not swallow ordinary content.
+
+    "Yes 1." and "No 2." are the reason no whitespace is allowed between the
+    letters and the digits: permitting it would turn every coded option into a
+    question boundary. Missing the rare "Q 12." written with a space is the
+    cheaper mistake.
+
+    "S2_AGE BANDS" is why the trailing part is bounded rather than a free
+    [A-Za-z0-9_]* — otherwise a derived-variable name reads as a label and
+    Phase 11's non-question detection breaks.
+    """
     assert labels_of([block(0, text)]) == []
 
 
@@ -132,7 +163,14 @@ def test_duplicate_labels_are_reported():
     assert any("Duplicate question label 'Q1'" in w for w in warnings)
 
 
-def test_custom_prefixes_are_honoured():
+def test_any_prefix_is_accepted_by_default():
+    """No enumerated list: the default accepts any label-shaped token."""
+    assert labels_of([block(0, "ZZ4. Never-seen prefix")]) == ["ZZ4"]
+    assert labels_of([block(0, "XYZ9. Another")]) == ["XYZ9"]
+
+
+def test_detection_can_still_be_narrowed_deliberately():
+    """The allowlist survives as an opt-in for one awkward document."""
     config = BoundaryConfig(prefixes=("ZZ",))
     assert labels_of([block(0, "ZZ4. Custom prefix")], config) == ["ZZ4"]
     assert labels_of([block(0, "Q4. Standard prefix")], config) == []

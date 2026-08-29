@@ -41,7 +41,9 @@ MAX_PASTE_CHARS = 60_000
 #: Corrections made while pasting. Kept separate from the document flow's
 #: memory so a paste and a review in progress cannot contaminate each other,
 #: which is the isolation Quick Convert has had since Phase 8.
-quick_corrections = CorrectionMemory()
+quick_corrections = CorrectionMemory(persist=True)
+quick_corrections.use_document("quick-convert")
+quick_corrections._source = "quick"
 
 
 class QuickConvertRequest(BaseModel):

@@ -122,7 +122,9 @@ def question_lines(document: ParsedDocument, question: QuestionBoundary) -> list
         elif isinstance(block, TableBlock):
             _add_table_lines(block, add)
 
-    return lines
+    from app.classify.wrapping import merge_wrapped_options
+
+    return merge_wrapped_options(lines)
 
 
 def _add_table_lines(table: TableBlock, add) -> None:

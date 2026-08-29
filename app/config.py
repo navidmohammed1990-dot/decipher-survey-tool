@@ -43,6 +43,12 @@ class Settings:
     #: Projected remaining time above which the review screen suggests batching.
     slow_classify_seconds: float = float(os.environ.get("DECIPHER_SLOW_CLASSIFY_SECONDS", "150"))
 
+    #: Where confirmed corrections are kept between runs. Set to an empty
+    #: string to keep them in memory only.
+    correction_library: str = os.environ.get(
+        "DECIPHER_CORRECTION_LIBRARY", str(BASE_DIR / "data" / "corrections.json")
+    )
+
     # -- resource tags (Phase 5) --
     #: Any file containing <res label="...">...</res> entries. Point this at the
     #: team's Standard_Template_Questions XML; the bundled file is a stand-in.

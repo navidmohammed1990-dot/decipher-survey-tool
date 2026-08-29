@@ -49,17 +49,41 @@ class Correction(BaseModel):
 
 
 class CorrectionMemory:
-    """The corrections made so far on the current document."""
+    """The corrections made so far on the current document.
 
-    def __init__(self) -> None:
+    Backed by a library when one is attached, so switching back to a document
+    restores what was already corrected on it rather than starting over.
+    """
+
+    def __init__(self, library=None, *, persist: bool = False) -> None:
         self._lock = threading.Lock()
         self._corrections: list[Correction] = []
         self._document: str | None = None
+        self._library = library
+        self._persist = persist
+        self._source = "review"
+
+    def _store(self):
+        """The library to write through to, if any.
+
+        An explicit library always wins, which is what lets tests swap in an
+        isolated one; otherwise the shared on-disk library is resolved lazily.
+        """
+        if self._library is not None:
+            return self._library
+        if not self._persist:
+            return None
+        from app.classify.library import default_library
+
+        return default_library()
 
     def record(self, correction: Correction) -> bool:
         """Keep a correction if it actually changed something."""
         if not correction.is_meaningful():
             return False
+        store = self._store()
+        if store is not None:
+            store.record(correction, self._document or "", source=self._source)
         with self._lock:
             # One entry per question: a second edit supersedes the first.
             self._corrections = [c for c in self._corrections if c.label != correction.label]
@@ -79,11 +103,19 @@ class CorrectionMemory:
         return "\n\n".join(c.as_prompt_example() for c in corrections) + "\n\n"
 
     def use_document(self, name: str | None) -> None:
-        """Switch documents, discarding corrections from the previous one."""
+        """Switch documents, discarding corrections from the previous one.
+
+        Anything the library already holds for this document comes back, so a
+        restart mid-review does not lose the corrections already made.
+        """
         with self._lock:
-            if name != self._document:
-                self._document = name
-                self._corrections = []
+            if name == self._document:
+                return
+            self._document = name
+            self._corrections = []
+            store = self._store()
+            if store is not None and name:
+                self._corrections = store.for_document(name)[-MAX_CORRECTIONS:]
 
     def clear(self) -> None:
         with self._lock:
@@ -91,4 +123,4 @@ class CorrectionMemory:
             self._document = None
 
 
-correction_memory = CorrectionMemory()
+correction_memory = CorrectionMemory(persist=True)

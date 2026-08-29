@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-9, 11, 14 complete. Phases 10, 12, 13 not started.**
+**Status: Phases 1-11 and 14 complete. Phases 12 and 13 not started.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -518,6 +518,75 @@ pointer to the document upload.
 
 ---
 
+## Phase 10 — Labels, wrapped options, and a library that persists
+
+### Labels are a shape, not a list
+
+Detection used an enumerated whitelist of prefixes, which only ever covers the
+questionnaires it was written against — `QD24`, `P1`, `MP2` and `QZ5` all
+failed silently. It is now a shape: **letters immediately followed by digits**,
+whatever those letters spell.
+
+```
+Q1.  QA1.  D5A.  S1.  QD24.  P1.  MP2.  QZ5.  APP1.     all match
+ZZ9.  XYZ1.  AB12.  K7.                                  so do these
+```
+
+Two deliberate bounds keep a general pattern from swallowing ordinary content:
+
+- **No whitespace between the letters and the digits.** Allowing it would make
+  `Yes 1.` and `No 2.` — ordinary coded options — read as question boundaries.
+  Missing the rare `Q 12.` written with a space is the cheaper mistake.
+- **The trailing part stays bounded** (`Q10a`, `Q1.2`, `Q5_1`) rather than a
+  free `[A-Za-z0-9_]*`. Otherwise `S2_AGE BANDS` reads as label `S2_AGE`, and
+  Phase 11's derived-variable detection breaks.
+
+`BoundaryConfig.prefixes` survives as an opt-in restriction for one awkward
+document; the default accepts any label-shaped token.
+
+**Both entry points already shared one implementation** — Quick Convert's
+splitter calls the same `match_question_label` the DOCX parser uses. A test now
+asserts the two agree on all nine styles so they cannot drift.
+
+### Wrapped options
+
+Long option text wraps in Word, stranding the code on a second line:
+
+```
+Buy it instead of another [BRAND] [FORMAT OF INTEREST]
+product you usually buy 1
+```
+
+Both paths now rejoin these into one option carrying code `1`. This is text
+reflow, the same class of repair as a table row split across cells — roles are
+still the classifier's to decide.
+
+Kept narrow, because wrongly gluing a comment onto an option is worse than
+leaving a wrap unrepaired. A merge needs the block to already code its options
+with a clear separator, and the first half must be long enough to have actually
+wrapped (≥25 characters), not sentence-final, not shouted (`S2_AGE BANDS`), not
+a routing note, and never the question's own first line.
+
+### The correction library
+
+Confirmed corrections now persist to `data/corrections.json`, written through a
+temp file so an interrupted save cannot truncate it. Reopening a document
+restores what was already corrected on it, so a restart mid-review no longer
+loses the work.
+
+Scope is preserved: a stored correction is offered back only for **its own
+document**, keeping Phase 7's rule that one client's conventions must not leak
+into another's. `promote()` marks an entry general when the pattern is not
+client-specific. Prompt inclusion is capped regardless of library size, because
+every entry costs inference time.
+
+```bash
+DECIPHER_CORRECTION_LIBRARY=          # empty keeps corrections in memory only
+```
+
+
+---
+
 ## Phase 11 — Content that isn't a question
 
 Not every block a programmer pastes is a question. A derived-variable
@@ -675,12 +744,14 @@ app/
     paste.py                    Pasted-text splitting (Quick Convert)
     seed_library.py             Curated examples carried on every call
     commands.py                 Plain-English correction interpreter
+    library.py                  Corrections persisted between runs
+    wrapping.py                 Rejoining options split across lines
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
   static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          515 tests
+tests/                          596 tests
 ```
 
 ## Configuration
@@ -752,7 +823,7 @@ These are honest boundaries of Phase 1, not defects:
 | 7     | AI-led line classification                   | ✅ done |
 | 8     | Quick Convert (paste entry point)            | ✅ done |
 | 9     | History + performance diagnosis              | ⚠️ A done, B diagnosed |
-| 10    | Multi-line options, flexible labels, persistent library | ❌ not started |
+| 10    | Multi-line options, flexible labels, persistent library | ✅ done |
 | 11    | Non-question content detection               | ✅ done |
 | 12    | Reference dataset + regression harness       | ❌ not started |
 | 13    | Real patterns from 6 questionnaires          | ❌ not started |

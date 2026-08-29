@@ -14,38 +14,56 @@ from app.models.document import Block, ParagraphBlock, QuestionBoundary, TextRun
 from app.parsing.formatting import runs_to_text, trim_runs_prefix
 from app.parsing.normalize import collapse_whitespace, normalize_for_matching
 
-#: Label prefixes seen on real questionnaires. Longest first so that "QS1"
-#: does not match as "Q" followed by stray text.
-DEFAULT_PREFIXES = (
-    "INTRO", "SCREEN", "DEM", "QS", "SC", "HD", "QA", "QB", "QC",
-    "Q", "S", "A", "B", "C", "D", "F",
-)
-
+#: A question label is letters then digits: Q1, QD24, MP2, APP1, D5A.
+#:
+#: Deliberately a shape rather than a list of known prefixes. An enumerated
+#: whitelist only ever covers the questionnaires it was written against, and
+#: silently drops the next house style it meets — QD24, P1 and MP2 all failed
+#: that way. Anything of this shape is a label, whatever its letters spell.
+LABEL_SHAPE = r"""
+    [A-Za-z]{{1,{max_letters}}}      # QD, MP, APP - any letters, not a fixed set
+    \d{{1,{max_digits}}}             # ...followed immediately by digits
+    [A-Za-z]?                       # an optional sub-letter: D5A, Q10a
+    (?:[._-]\d{{1,{max_digits}}})?   # an optional numeric sub-part: Q1.2, Q5_1
+"""
 
 @dataclass
 class BoundaryConfig:
     """Tuning knobs for boundary detection."""
 
-    prefixes: tuple[str, ...] = DEFAULT_PREFIXES
     allow_numeric_fallback: bool = True
-    """When no prefixed label exists anywhere, treat "1." / "2)" paragraphs as
+    """When no lettered label exists anywhere, treat "1." / "2)" paragraphs as
     question starts."""
     max_label_digits: int = 3
+    max_label_letters: int = 3
+    prefixes: tuple[str, ...] | None = None
+    """Optional restriction to specific prefixes.
+
+    ``None`` accepts any label of the right shape, which is the point. Set it
+    only to deliberately narrow detection for one awkward document.
+    """
     extra_patterns: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _build_prefixed_pattern(config: BoundaryConfig) -> re.Pattern:
-    prefixes = sorted(config.prefixes, key=len, reverse=True)
-    alternation = "|".join(re.escape(p) for p in prefixes)
+    """Compile the label matcher.
+
+    Note there is no whitespace allowed between the letters and the digits.
+    Permitting it would make "Yes 1." and "No 2." — ordinary coded options —
+    look like question labels, which is a far worse failure than missing the
+    rare "Q 12." written with a space.
+    """
+    shape = LABEL_SHAPE.format(
+        max_letters=config.max_label_letters, max_digits=config.max_label_digits
+    )
+    if config.prefixes:
+        alternation = "|".join(re.escape(p) for p in sorted(config.prefixes, key=len, reverse=True))
+        shape = rf"(?:{alternation})\d{{1,{config.max_label_digits}}}[A-Za-z]?"
+
     return re.compile(
         rf"""^[ \t]*
         \[?[ \t]*
-        (?P<label>
-            (?:{alternation})
-            [ \t]*\d{{1,{config.max_label_digits}}}
-            [A-Za-z]?
-            (?:[._-]\d{{1,{config.max_label_digits}}})?
-        )
+        (?P<label>{shape})
         [ \t]*\]?
         (?P<sep>[.):\-–—]+[ \t]*|[ \t]+|$)
         """,
