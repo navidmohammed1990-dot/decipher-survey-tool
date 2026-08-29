@@ -21,6 +21,22 @@ def parsed_payload(sample_docx):
     return parse_docx(sample_docx).model_dump(mode="json")
 
 
+@pytest.fixture
+def uniform_payload(tmp_path):
+    """Two questions of identical shape: title, comment, two options."""
+    import docx
+
+    document = docx.Document()
+    for number in (1, 2):
+        document.add_paragraph(f"Q{number}. Which of these apply?")
+        document.add_paragraph("Please select all that apply.")
+        document.add_paragraph("Brand A")
+        document.add_paragraph("Brand B")
+    path = tmp_path / "uniform.docx"
+    document.save(path)
+    return parse_docx(path).model_dump(mode="json")
+
+
 @pytest.fixture(autouse=True)
 def _clean_store():
     draft_store.clear()
@@ -88,16 +104,21 @@ def test_classify_stores_the_draft(client, parsed_payload, fake_ai):
     assert [q.label for q in draft_store.get().questions] == ["S1", "Q5", "Q6", "Q7"]
 
 
-def test_threshold_query_param_controls_flagging(client, parsed_payload, fake_ai):
-    # Options [2, 3] exist in every question of the fixture, so nothing is
-    # flagged for a structural reason and confidence alone decides.
-    fake_ai(payload={**CHECKBOX_ANSWER, "option_lines": [2, 3], "confidence": 0.8})
+def test_threshold_query_param_controls_flagging(client, uniform_payload, fake_ai):
+    """Confidence alone decides when nothing else is amiss.
 
-    lenient = client.post("/api/classify?threshold=0.5", json=parsed_payload).json()
-    strict = client.post("/api/classify?threshold=0.95", json=parsed_payload).json()
+    Uses a document whose questions all have the same shape, so one canned
+    answer claims every line: an unclaimed line would trip the dropped-option
+    guard and flag for a structural reason instead.
+    """
+    fake_ai(payload={"element": "checkbox", "title_lines": [0], "comment_lines": [1],
+                     "option_lines": [2, 3], "confidence": 0.8, "notes": "select all"})
+
+    lenient = client.post("/api/classify?threshold=0.5", json=uniform_payload).json()
+    strict = client.post("/api/classify?threshold=0.95", json=uniform_payload).json()
 
     assert lenient["summary"]["flagged"] == 0
-    assert strict["summary"]["flagged"] == 4
+    assert strict["summary"]["flagged"] == 2
     assert strict["review_threshold"] == 0.95
 
 

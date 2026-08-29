@@ -25,7 +25,7 @@ from app.classify.paste import split_questions
 from app.config import settings
 from app.generate.export import check_well_formed
 from app.generate.xml_generator import UnsupportedElementError, generate_questions
-from app.models.survey import Question
+from app.models.survey import NON_QUESTION_ELEMENTS, Question
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,8 @@ def quick_convert(
     elif fallback_count:
         warnings.append(f"{fallback_count} question(s) fell back to the heuristic.")
 
+    warnings.extend(_non_question_warnings(questions))
+
     xml, well_formed, error = _render(questions)
     return QuickConvertResponse(
         questions=questions,
@@ -147,6 +149,25 @@ def quick_generate(request: QuickGenerateRequest) -> QuickConvertResponse:
     return QuickConvertResponse(
         questions=request.questions, xml=xml, well_formed=well_formed, error=error
     )
+
+
+def _non_question_warnings(questions: list[Question]) -> list[str]:
+    """Say so plainly when a block was programmer content, not a question."""
+    blocks = [q for q in questions if q.element in NON_QUESTION_ELEMENTS]
+    if not blocks:
+        return []
+
+    labels = ", ".join(q.label for q in blocks)
+    if len(blocks) == len(questions):
+        return [
+            "This looks like a programmer instruction, not a respondent-facing "
+            "question - no XML was generated. The original text is kept below "
+            "for reference."
+        ]
+    return [
+        f"{labels}: programmer instruction rather than a question - no XML "
+        f"generated for it. The original text is kept for reference."
+    ]
 
 
 def _render(questions: list[Question]) -> tuple[str, bool, str | None]:

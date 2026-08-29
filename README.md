@@ -3,7 +3,7 @@
 A local-network tool that converts a formatted questionnaire into a validated base
 Decipher XML structure, leaving complex programming to the survey programmer.
 
-**Status: Phases 1-8 complete. Two entry points over one engine.**
+**Status: Phases 1-9, 11 complete. Two entry points over one engine.**
 
 Upload a questionnaire, let the local AI classify it, correct anything it got
 wrong, and export base Decipher XML.
@@ -518,6 +518,61 @@ pointer to the document upload.
 
 ---
 
+## Phase 11 — Content that isn't a question
+
+Not every block a programmer pastes is a question. A derived-variable
+definition is meta-content addressed to *them*:
+
+```
+[Please create the following variable for datafile and auto code based on S2 Age]:
+S2_AGE BANDS
+Under 18 years  1
+...
+```
+
+There is nothing here a respondent answers. Without an outcome for that, the
+classifier forced it into a `<radio>` and produced one row — the variable's own
+name — losing the rest.
+
+`not_a_question` is now a sibling element alongside the nine real ones. When it
+applies, **no XML is generated at all**: no title, no options, no row
+numbering. The original text is preserved in the routing-notes box for
+reference and copying, and the page says plainly what happened.
+
+The prompt offers cues as evidence rather than gates, per Phase 7 — bracketed
+instruction phrasing, a reference to an already-asked question, a
+variable-name-shaped token, no natural-language question anywhere — and states
+explicitly that a block which *does* ask something stays a question even when
+it also carries programmer notes.
+
+### The dropped-option guard
+
+An option element that takes implausibly few options from the lines available
+now sets `needs_review` with a note naming the numbers, rather than exporting a
+near-empty question in silence. It only fires on unclaimed lines that plausibly
+look like options: long prose, routing lines and trailing notes are ignored, and
+a couple of stray lines is not enough.
+
+### Seed library
+
+`app/classify/seed_library.py` holds curated examples carried on **every** call,
+unlike session corrections which clear between documents. Seeded with the
+age-banding case, so the pattern is recognised on first sight.
+
+Each entry costs prompt tokens on every call, and prompt size is paid for in
+seconds on a CPU-bound runtime — the system prompt went from ~496 to ~745 tokens
+with Phase 11. Add an entry only for a pattern the model reliably gets wrong.
+
+### Column-aligned codes
+
+Found while investigating the dropped rows: Word pastes table columns as runs of
+spaces as often as tabs, and `Under 18 years  1` had its `1` absorbed into the
+option text. Two-or-more spaces before a short number at end of line is now read
+as a column. A single space is not, so `I have lived here 20 years` keeps its 20.
+
+
+---
+
 ## Project layout
 
 ```
@@ -554,12 +609,13 @@ app/
     features.py                 Factual line hints (no roles assigned)
     corrections.py              Session-level learning from SP edits
     paste.py                    Pasted-text splitting (Quick Convert)
+    seed_library.py             Curated examples carried on every call
     jobs.py                     Background jobs, progress, cancellation
   generate/
     resources.py                <res> catalog and the element -> tag map
   static/                       Both UIs (no build step, no dependencies)
 reference/res_catalog.xml       Stand-in resource catalog
-tests/                          460 tests
+tests/                          492 tests
 ```
 
 ## Configuration
@@ -630,8 +686,10 @@ These are honest boundaries of Phase 1, not defects:
 | 6     | Bug fixes from the first real questionnaire   | ✅ done |
 | 7     | AI-led line classification                   | ✅ done |
 | 8     | Quick Convert (paste entry point)            | ✅ done |
-| 9     | Validation and QA reporting                  | next   |
-| 10    | Pilot on real questionnaires                 |        |
+| 9     | History + performance diagnosis              | ⚠️ A done, B diagnosed |
+| 11    | Non-question content detection               | ✅ done |
+| 12    | Validation and QA reporting                  | next   |
+| 13    | Pilot on real questionnaires                 |        |
 
 > AI should understand the questionnaire. Deterministic code should control the
 > survey structure. The programmer should control the final decision.

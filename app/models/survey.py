@@ -16,6 +16,7 @@ from app.models.document import TextRun  # re-exported: one run type across all 
 
 __all__ = [
     "SUPPORTED_ELEMENTS",
+    "NON_QUESTION_ELEMENTS",
     "SubjectType",
     "TextRun",
     "OptionLine",
@@ -36,7 +37,14 @@ SUPPORTED_ELEMENTS: tuple[str, ...] = (
     "number",
     "select",
     "html",
+    "not_a_question",
 )
+
+#: Elements that describe no respondent-facing question at all. A programmer
+#: instruction or a derived-variable definition is meta-content like a routing
+#: note, except that it is the *whole* block rather than one line inside a
+#: real question. Nothing here is ever given a question shape.
+NON_QUESTION_ELEMENTS = frozenset({"not_a_question"})
 
 #: Elements whose answer list lives in ``options``.
 OPTION_ELEMENTS = frozenset({"radio", "checkbox", "select"})
@@ -134,6 +142,11 @@ class Question(BaseModel):
     @property
     def is_grid(self) -> bool:
         return self.element in GRID_ELEMENTS
+
+    @property
+    def is_question(self) -> bool:
+        """False when this block is programmer content, not a question."""
+        return self.element not in NON_QUESTION_ELEMENTS
 
 
 class QuestionDraft(BaseModel):

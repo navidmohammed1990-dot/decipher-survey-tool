@@ -27,6 +27,13 @@ from app.parsing.question_boundaries import BoundaryConfig, match_question_label
 #: and its code belong together.
 _CELL_SEPARATOR = re.compile(r"[\t]+|(?: {2,}\|)|(?:\|(?= ))")
 
+#: A column-aligned code: two or more spaces, then a short number, at line end.
+#: Word pastes table columns as runs of spaces as often as it does tabs, and
+#: whitespace collapsing happens before codes are read — so without this the
+#: "1" in "Under 18 years  1" is absorbed into the option's own text.
+#: Two spaces are required: "I have lived here 20 years" must not lose its 20.
+_ALIGNED_CODE = re.compile(r"^(?P<text>\S.*?\S)[ \t]{2,}(?P<code>\d{1,3})\s*$")
+
 #: A label with no question after it still deserves a block.
 DEFAULT_LABEL = "Q1"
 
@@ -48,7 +55,13 @@ def join_cells(line: str) -> str:
     trailing code, the same way it does for a real DOCX table row.
     """
     cells = [cell.strip() for cell in _CELL_SEPARATOR.split(line) if cell and cell.strip()]
-    return " | ".join(cells) if len(cells) > 1 else line.strip()
+    if len(cells) > 1:
+        return " | ".join(cells)
+
+    aligned = _ALIGNED_CODE.match(line)
+    if aligned:
+        return f"{aligned.group('text')} | {aligned.group('code')}"
+    return line.strip()
 
 
 def normalise_lines(text: str) -> list[str]:

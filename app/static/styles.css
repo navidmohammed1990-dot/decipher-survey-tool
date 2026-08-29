@@ -430,3 +430,10 @@ input[type="text"] {
 
 @media (max-width: 900px) { .history-panes { grid-template-columns: 1fr; } }
 @media (prefers-color-scheme: dark) { .history-body { background: #191d24; } }
+
+
+/* A block that is programmer content, not a question. */
+.quick-card.non-question,
+.question-card.non-question { border-left: 4px solid var(--muted); }
+.quick-card.non-question .qc-title,
+.question-card.non-question .qc-title { color: var(--muted); font-style: italic; }

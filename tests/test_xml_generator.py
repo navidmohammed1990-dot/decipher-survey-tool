@@ -164,8 +164,12 @@ def test_columns_still_take_open_handling_for_other_specify():
 # -- element shapes -------------------------------------------------------
 
 
-def test_every_supported_element_has_a_spec():
-    assert set(ELEMENT_SPECS) == set(SUPPORTED_ELEMENTS)
+def test_every_element_either_has_a_spec_or_is_non_question():
+    """not_a_question deliberately has no XML shape — it renders nothing."""
+    from app.models.survey import NON_QUESTION_ELEMENTS
+
+    assert set(ELEMENT_SPECS) | NON_QUESTION_ELEMENTS == set(SUPPORTED_ELEMENTS)
+    assert set(ELEMENT_SPECS).isdisjoint(NON_QUESTION_ELEMENTS)
 
 
 def test_radio_matches_the_canonical_attribute_set():

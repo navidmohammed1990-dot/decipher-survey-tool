@@ -6,9 +6,13 @@
 const SUPPORTED_ELEMENTS = [
   "radio", "checkbox", "radio_grid", "checkbox_grid",
   "textarea", "text", "number", "select", "html",
+  // Programmer content: generates nothing. Must be listed, or a card
+  // classified this way would silently fall back to the first option.
+  "not_a_question",
 ];
 const GRID_ELEMENTS = new Set(["radio_grid", "checkbox_grid"]);
 const OPTION_ELEMENTS = new Set(["radio", "checkbox", "select"]);
+const NON_QUESTION_ELEMENTS = new Set(["not_a_question"]);
 
 const $ = (id) => document.getElementById(id);
 
@@ -101,7 +105,7 @@ function showXml(body) {
     ? "not well-formed"
     : lastFragments
       ? `${(lastFragments.match(/<suspend\/>/g) || []).length} question(s)`
-      : "";
+      : "nothing to generate";
 }
 
 function wrapped() {
@@ -188,6 +192,11 @@ function card(question, position) {
   badge.classList.add(question.needs_review ? "flag" : "good");
 
   renderRouting(root, question);
+  if (NON_QUESTION_ELEMENTS.has(question.element)) {
+    root.classList.add("non-question");
+    root.querySelector(".qc-title").textContent =
+      "Programmer instruction — not a respondent question. No XML generated.";
+  }
 
   const select = root.querySelector(".element-select");
   SUPPORTED_ELEMENTS.forEach((name) => {

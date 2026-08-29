@@ -15,11 +15,13 @@ import logging
 from pydantic import BaseModel, Field
 
 from app.classify.corrections import correction_memory
+from app.classify.seed_library import prompt_prefix as seed_prefix
 from app.classify.lines import SourceLine, marker_code, question_lines
 from app.classify.ollama import OllamaClient, OllamaError
 from app.models.document import ParsedDocument, TextRun
 from app.generate.resources import DEFAULT_SUBJECT_TYPE, SUBJECT_TYPES, resource_tag_for
 from app.models.survey import (
+    NON_QUESTION_ELEMENTS,
     ClassificationTrace,
     GRID_ELEMENTS,
     OPTION_ELEMENTS,
@@ -76,7 +78,17 @@ usually introduces the NEXT question - classify it as routing and do not use
 it as this question's type signal.
 
 Then decide the element type: radio, checkbox, radio_grid, checkbox_grid,
-textarea, text, number, select, html. Use the type_signal if one exists and
+textarea, text, number, select, html, not_a_question.
+
+Choose not_a_question when the WHOLE block speaks to the programmer, not the
+respondent - a derived-variable definition, a coding instruction. Evidence,
+not rules: bracketed instruction phrasing ("Please create...", "auto code
+based on..."); a reference to an already-asked question ("based on S2 Age");
+a variable-name token like S2_AGE BANDS instead of a sentence; no
+natural-language question anywhere. If the block does ask the respondent
+something, it is a question - put programmer notes in routing_lines instead.
+
+Use the type_signal if one exists and
 options are present (SC->radio, MC->checkbox) unless the options clearly
 form a grid (row statements x column scale). If no options exist, ignore
 any type_signal and classify from the question's wording instead.
@@ -180,6 +192,29 @@ def _coerce_subject_type(value, element: str) -> str:
     return DEFAULT_SUBJECT_TYPE
 
 
+
+def _non_question_outcome(
+    label: str, element: str, lines: list[SourceLine], confidence: float, notes: str
+) -> ClassificationOutcome:
+    """A block the model judged to be programmer content, not a question.
+
+    Every line is preserved for the programmer to read and copy, and none of it
+    is put through option numbering or any other question-shaped processing.
+    """
+    return ClassificationOutcome(
+        question=Question(
+            label=label,
+            element=element,
+            confidence=confidence,
+            # Not flagged: this is a definite answer, not an uncertain one.
+            needs_review=False,
+            ai_notes=notes,
+            routing_notes=[line.text for line in lines],
+            trace=ClassificationTrace(lines=[line.text for line in lines]),
+        )
+    )
+
+
 def interpret_response(
     payload: dict, label: str, lines: list[SourceLine], threshold: float
 ) -> ClassificationOutcome:
@@ -215,6 +250,11 @@ def interpret_response(
         by_index[index].text
         for index in picks["routing_lines"] + picks["type_signal_lines"]
     ]
+
+    if element in NON_QUESTION_ELEMENTS:
+        # The whole block is programmer content. Keep every line verbatim for
+        # reference and build nothing: no title, no options, no row numbering.
+        return _non_question_outcome(label, element, lines, confidence, notes_text)
     question = Question(
         label=label,
         element=element,
@@ -235,6 +275,7 @@ def interpret_response(
     )
 
     warnings.extend(_structural_warnings(question))
+    warnings.extend(_dropped_option_warnings(question, lines, picks))
     warnings.extend(disagreements(question, payload, lines, picks, notes_text))
     question.needs_review = confidence < threshold or bool(warnings)
     if warnings:
@@ -316,6 +357,50 @@ def _type_tag_disagreement(
     return []
 
 
+
+#: An unclaimed line only counts as a missed option if it looks like one.
+_MAX_OPTION_CHARS = 90
+
+#: Below this many unclaimed option-shaped lines, silence is unremarkable.
+_MIN_UNCLAIMED_TO_FLAG = 3
+
+
+def _option_shaped(line: SourceLine) -> bool:
+    """Whether an unassigned line plausibly belongs in the option list."""
+    text = line.text.strip()
+    if not text or len(text) > _MAX_OPTION_CHARS or text.endswith("?"):
+        return False
+    return not line.features.matches_routing_keyword
+
+
+def _dropped_option_warnings(
+    question: Question, lines: list[SourceLine], picks: dict[str, list[int]]
+) -> list[str]:
+    """Catch an option list that quietly lost most of its options.
+
+    An eight-band list that produced one row exported a near-empty question
+    without complaint. Rather than guess which lines were meant, say the
+    numbers do not add up and let the programmer look.
+    """
+    if question.element not in OPTION_ELEMENTS | GRID_ELEMENTS:
+        return []
+
+    chosen = sum(len(picks[key]) for key in ROLE_KEYS)
+    if not chosen:
+        return []
+
+    claimed = {index for key in ROLE_KEYS for index in picks[key]}
+    unclaimed = [line for line in lines if line.index not in claimed and _option_shaped(line)]
+    selected = len(question.options) + len(question.rows) + len(question.cols)
+
+    if len(unclaimed) >= _MIN_UNCLAIMED_TO_FLAG and len(unclaimed) > selected:
+        return [
+            f"Only {selected} option(s) were taken from this block, but "
+            f"{len(unclaimed)} more lines look like options and were left out "
+            f"- please check nothing was dropped."
+        ]
+    return []
+
 def _structural_warnings(question: Question) -> list[str]:
     """Catch classifications that cannot produce sensible XML.
 
@@ -381,8 +466,10 @@ def classify_question(
         )
 
     try:
+        # Seeded examples are always carried; document corrections are not,
+        # since they belong to the document currently under review.
         prefix = correction_memory.prompt_prefix() if system_prefix is None else system_prefix
-        system = prefix + SYSTEM_PROMPT
+        system = seed_prefix() + prefix + SYSTEM_PROMPT
         payload = client.generate_json(system, build_prompt(label, lines))
         return interpret_response(payload, label, lines, threshold)
     except (OllamaError, ValueError) as exc:

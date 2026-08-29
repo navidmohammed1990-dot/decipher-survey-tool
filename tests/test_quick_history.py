@@ -166,6 +166,7 @@ def test_quick_convert_carries_no_correction_history(client, stub):
     """
     from app.classify.classifier import SYSTEM_PROMPT
     from app.classify.corrections import Correction, correction_memory
+    from app.classify.seed_library import prompt_prefix as seed_prefix
 
     correction_memory.clear()
     correction_memory.use_document("some.docx")
@@ -179,7 +180,12 @@ def test_quick_convert_carries_no_correction_history(client, stub):
     client.post("/api/quick-convert", json={"text": "Q1. Pick one\nYes\nNo"})
     correction_memory.clear()
 
-    assert stub.systems[0] == SYSTEM_PROMPT, "no correction examples reached the paste path"
+    system = stub.systems[0]
+    assert "The survey programmer corrected an earlier question" not in system, (
+        "document corrections must not reach the paste path"
+    )
+    # Seeded examples are permanent and do travel with every call.
+    assert system == seed_prefix() + SYSTEM_PROMPT
 
 
 # -- one tags round trip ---------------------------------------------------

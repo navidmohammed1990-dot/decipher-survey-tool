@@ -203,7 +203,10 @@ def test_low_confidence_flags_for_review(q5_lines):
 
 
 def test_threshold_is_respected(q5_lines):
-    payload = {"element": "radio", "title_lines": [0], "option_lines": [2], "confidence": 0.5}
+    # A complete payload, so confidence alone decides: leaving options behind
+    # would trip the dropped-option guard and mask what this test is about.
+    payload = {"element": "radio", "title_lines": [0], "comment_lines": [1],
+               "option_lines": [2, 3, 4, 5], "confidence": 0.5}
     assert interpret_response(payload, "Q5", q5_lines, 0.4).question.needs_review is False
     assert interpret_response(payload, "Q5", q5_lines, 0.9).question.needs_review is True
 

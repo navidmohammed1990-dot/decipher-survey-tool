@@ -4,9 +4,13 @@
 const SUPPORTED_ELEMENTS = [
   "radio", "checkbox", "radio_grid", "checkbox_grid",
   "textarea", "text", "number", "select", "html",
+  // Programmer content: generates nothing. Must be listed, or a card
+  // classified this way would silently fall back to the first option.
+  "not_a_question",
 ];
 const GRID_ELEMENTS = new Set(["radio_grid", "checkbox_grid"]);
 const OPTION_ELEMENTS = new Set(["radio", "checkbox", "select"]);
+const NON_QUESTION_ELEMENTS = new Set(["not_a_question"]);
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
@@ -382,6 +386,11 @@ function questionCard(question) {
   card.querySelector(".qc-title").textContent = runsText(question.title) || "(no title)";
   card.querySelector(".ai-notes").textContent = question.ai_notes || "";
   renderRoutingNotes(card, question);
+  if (NON_QUESTION_ELEMENTS.has(question.element)) {
+    card.classList.add("non-question");
+    card.querySelector(".qc-title").textContent =
+      "Programmer instruction — not a respondent question. No XML generated.";
+  }
 
   const badge = card.querySelector(".confidence");
   const percent = Math.round((question.confidence || 0) * 100);
