@@ -465,6 +465,74 @@ def _all_coded(lines: list[str]) -> bool:
     return bool(lines) and all(detect_trailing_code(line) for line in lines)
 
 
+#: A label of any shape, for the recurrence test below. The letter bound is
+#: wide where :data:`LABEL_SHAPE`'s is three, because nothing here rests on the
+#: shape alone - a token only counts once the same prefix has been seen opening
+#: several lines. Widening the ordinary bound instead would just move the wall
+#: to the next house style that walks past it.
+_ANY_LABEL = re.compile(
+    r"^[ \t]*(?P<label>(?P<prefix>[A-Za-z]{1,12})\d{1,3}[A-Za-z]?)"
+    r"[ \t]*[.):]+[ \t]*(?=\S)"
+)
+
+#: How many lines a prefix must open before it is a label style rather than a
+#: coincidence. Two is enough: the recurrence *is* the evidence, and this only
+#: runs where no label the tool knows was found anywhere in the paste.
+MIN_RECURRING_LABELS = 2
+
+
+def label_candidate(line: str) -> tuple[str, str, int] | None:
+    """A line's opening token, if it could be a label of an unknown style."""
+    from app.classify.features import detect_trailing_code
+
+    match = _ANY_LABEL.match(line)
+    if match is None:
+        return None
+    if detect_trailing_code(line):
+        # "Brand1 | 1" is a coded answer, not a question heading.
+        return None
+    return match.group("prefix").upper(), match.group("label").upper(), match.end()
+
+
+def recurring_prefix(blocks: list[list[str]]) -> str | None:
+    """The label prefix a paste repeats, when the tool knows no other.
+
+    Phase 15 made a blank line a segmentation signal in its own right, which
+    fixed the Sent1/Sent1B/Sent2 paste - as long as the questions were
+    separated by blank lines. Pasted without them, the same questionnaire
+    collapsed back into one question: four letters where the label shape allows
+    three, and no gaps to fall back on.
+
+    So the shape is not what is asked. A house style announces itself by
+    *repeating*: whatever "Sent" is, a token that opens six lines of one paste
+    and nothing else does is that paste's label. Reading the repetition rather
+    than the spelling is what stops the next unknown prefix failing the same
+    way.
+    """
+    counts: dict[str, int] = {}
+    for block in blocks:
+        for line in block:
+            found = label_candidate(line)
+            if found:
+                counts[found[0]] = counts.get(found[0], 0) + 1
+
+    if not counts:
+        return None
+    prefix, count = max(counts.items(), key=lambda item: item[1])
+    return prefix if count >= MIN_RECURRING_LABELS else None
+
+
+def _recurring_labels_in(lines: list[str], prefix: str) -> list[tuple[int, tuple]]:
+    """Where ``prefix`` opens a line, in the shape ``labels_in`` returns."""
+    found = []
+    for position, line in enumerate(lines):
+        candidate = label_candidate(line)
+        if candidate and candidate[0] == prefix:
+            _, label, end = candidate
+            found.append((position, (label, line[:end].strip(), end)))
+    return found
+
+
 def _next_placeholder(used: set[str], counter: int) -> tuple[str, int]:
     """A label for a question whose own label could not be read."""
     while True:
@@ -502,7 +570,18 @@ def split_questions(
         ]
 
     anywhere = any(labels_in(block, False) for block in raw_blocks)
-    allow_numeric = not anywhere
+
+    # A repeated unknown prefix outranks plain numbering: "Sent1." recurring
+    # six times says more about this document than a stray "1." does.
+    recurring = None if anywhere else recurring_prefix(raw_blocks)
+    if recurring:
+        warnings.append(
+            f"No label pattern the tool knows; split on '{recurring}', which "
+            f"opens several lines and so reads as this document's label style. "
+            f"Check the split is right."
+        )
+
+    allow_numeric = not anywhere and recurring is None
     if allow_numeric and any(labels_in(block, True) for block in raw_blocks):
         warnings.append(
             "No Q-style labels found; split on plain numbering instead. "
@@ -524,6 +603,8 @@ def split_questions(
 
     for block in raw_blocks:
         matches = labels_in(block, allow_numeric)
+        if not matches and recurring:
+            matches = _recurring_labels_in(block, recurring)
 
         if not matches:
             # A run of coded answers under its own blank line belongs to the

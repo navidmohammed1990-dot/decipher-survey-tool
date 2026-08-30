@@ -174,6 +174,15 @@ def detect_boundaries(
             )
 
     if not matches:
+        matches = _recurring_matches(blocks)
+        if matches:
+            warnings.append(
+                f"No label pattern the tool knows; split on a prefix repeated at "
+                f"the start of {len(matches)} paragraphs, which reads as this "
+                f"document's label style. Verify the split."
+            )
+
+    if not matches:
         if not blocks:
             warnings.append("No question boundaries detected in this document.")
             return [], warnings
@@ -260,6 +269,43 @@ def _reassign_trailing_headers(boundaries: list[QuestionBoundary], by_index: dic
         following.block_indices[:0] = moved
         current.end_index = current.block_indices[-1]
         following.start_index = following.block_indices[0]
+
+
+def _recurring_matches(blocks: list[Block]) -> list[_Match]:
+    """Question starts found from a prefix the document repeats.
+
+    Shares its judgment with the pasted-text path: a house style announces
+    itself by recurring, so a token opening several paragraphs is this
+    document's label whatever it spells. Without this a DOCX using an unknown
+    prefix and no empty paragraphs between questions yields no questions at
+    all - the whole file becomes one preamble.
+    """
+    from app.classify.paste import label_candidate, recurring_prefix
+
+    paragraphs = [
+        block
+        for block in blocks
+        if isinstance(block, ParagraphBlock) and not block.is_empty
+    ]
+    prefix = recurring_prefix([[block.text for block in paragraphs]])
+    if prefix is None:
+        return []
+
+    matches: list[_Match] = []
+    for block in paragraphs:
+        found = label_candidate(block.text)
+        if found and found[0] == prefix:
+            _, label, end = found
+            matches.append(
+                _Match(
+                    block_index=block.index,
+                    label=label,
+                    raw_label=block.text[:end].strip(),
+                    end_offset=end,
+                    pattern="recurring",
+                )
+            )
+    return matches
 
 
 def _gap_segments(blocks: list[Block]) -> list[QuestionBoundary]:

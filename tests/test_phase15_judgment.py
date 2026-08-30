@@ -45,9 +45,12 @@ def test_a_label_style_the_regex_cannot_read_still_splits():
     blocks, warnings = split_questions(paste)
 
     assert len(blocks) == 3, "blank lines separated three questions"
-    assert all(block.synthesised_label for block in blocks)
-    assert [block.label for block in blocks] == ["Q1", "Q2", "Q3"]
-    assert any("confirm/correct" in w for w in warnings)
+    # Phase 21 improved this: the repeated "Sent" prefix is now read as this
+    # document's label style, so the real labels survive instead of
+    # placeholders. The gap split still decides where the questions are.
+    assert [block.label for block in blocks] == ["SENT1", "SENT1B", "SENT2"]
+    assert not any(block.synthesised_label for block in blocks)
+    assert any("label style" in w for w in warnings)
 
 
 def test_a_options_do_not_bleed_between_gap_split_questions():
@@ -141,8 +144,27 @@ def test_a_docx_with_unreadable_labels_splits_on_empty_paragraphs():
 
     boundaries, warnings = detect_boundaries(blocks)
 
-    assert [b.label for b in boundaries] == ["Q1", "Q2"]
+    # Phase 21 improved this too: the repeated "Sent" prefix is recognised as
+    # the document's label style, so the real labels survive. The gap fallback
+    # below still covers a document where nothing recurs.
+    assert [b.label for b in boundaries] == ["SENT1", "SENT2"]
     assert not any(b.is_preamble for b in boundaries)
+    assert any("label style" in w for w in warnings)
+
+
+def test_a_docx_with_no_recurring_prefix_still_splits_on_empty_paragraphs():
+    lines = [
+        "How much do you agree?",
+        "Strongly agree",
+        "",
+        "Which brands do you recall?",
+        "Brand A",
+    ]
+    blocks = [ParagraphBlock(index=i, text=t) for i, t in enumerate(lines)]
+
+    boundaries, warnings = detect_boundaries(blocks)
+
+    assert [b.label for b in boundaries] == ["Q1", "Q2"]
     assert any("split on blank lines" in w for w in warnings)
 
 

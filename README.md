@@ -1028,6 +1028,49 @@ way silently marks a real answer exclusive.
 
 ---
 
+## Phase 21 — A repeated prefix is a label style
+
+Phase 15 made a blank line a segmentation signal in its own right, which fixed
+the `Sent1.` / `Sent1B.` / `Sent2.` paste — **as long as blank lines separated
+the questions**. Pasted without them, the same questionnaire collapsed back
+into one 18-line question: four letters where the label shape allows three, and
+no gaps to fall back on.
+
+The fix is not a wider letter bound. That only moves the wall to the next house
+style that walks past it — the same enumerate-don't-generalize trap Phase 15
+was about. A style announces itself by **repeating**: whatever "Sent" is, a
+token that opens six lines of one paste and nothing else does *is* that paste's
+label.
+
+```
+Sent1. How much do you agree with this statement?   →  7 questions,
+Sent1B. And how confident are you in that answer?      labelled SENT1,
+Sent2. Which of these brands do you recall?            SENT1B, SENT2 …
+…
+```
+
+Recurrence carries the evidence, so the shape can be loose — up to twelve
+letters here, against the ordinary bound of three. What keeps it honest is what
+it demands instead:
+
+- it runs **only** when no label the tool already knows was found anywhere, so
+  a working `Q1.`/`QD24.` document is never second-guessed;
+- a candidate needs real punctuation after it, so `Sent1 How much` is not a
+  label;
+- a line carrying a trailing code is an answer, not a heading — `Brand1. Coca-Cola | 1`
+  repeats a prefix three times and is still one question;
+- the prefix must open at least two lines, since one occurrence is a sentence.
+
+A recurring prefix also outranks the plain-numbering fallback: `Sent1.` seen six
+times says more about a document than a stray `1.` does.
+
+Both entry points share the judgment. The DOCX path had the identical gap — a
+document using an unknown prefix with no empty paragraphs between questions
+produced *no questions at all*, the whole file becoming one preamble. Its
+blank-line fallback still covers a document where nothing recurs.
+
+---
+
 ## Project layout
 
 ```
