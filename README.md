@@ -697,15 +697,27 @@ turns those into the labels and attributes the template calls for. Which
 *element* the model picks is judgment and needs a real runtime, so it is
 reported rather than faked.
 
-**18 of 19 entries pass.** The one that does not is listed in
-`EXPECTED_FAILURES` with its reason, so the rest guard against regression now:
+**24 of 27 entries pass.** The three that do not are listed in
+`EXPECTED_FAILURES` with their reasons, so the rest guard against regression
+now. Each is an unbuilt pattern rather than a defect in working code:
 
-| Entry | Why |
+| Entry | What it needs |
 |---|---|
-| `checkbox_grid_basic` | Dataset expects `${res.MR}`; the Phase 5 addendum maps `checkbox_grid` to `${res.MRStatement}`. A specification conflict, not a code defect — one of the two needs correcting. |
+| `checkbox_with_select_n_constraint` | A per-row directive written *inside* the option's own cell — `Other (specify) OE, ANCHOR BASE` — stays glued to the option text. Only a directive in a third column is split off today. |
+| `checkbox_grid_dynamic_columns` | Rows carry a leading row-id column (`01 Has the lowest prices  1`) alongside a separate trailing code. Leading ids are recognised only when punctuated (`1.`, `97.`), so `01 ` stays in the text. |
+| `number_grid_with_per_row_constraints` | Three unbuilt patterns at once: a leading code column (`_1`, `991`), rows wrapping onto a second line with no trailing code to close them, and per-row min/max written as prose — which the `Question` model has no field for. |
+
+The earlier `checkbox_grid_basic` conflict is **resolved**: the dataset now
+expects `${res.MRStatement}`, matching the Phase 5 addendum, and the entry
+passes.
 
 An entry that starts passing while still listed fails the suite, so the notes
 cannot go stale.
+
+`A20` — a standalone bipolar scale tagged `SR` and formatted as a plain
+numbered list — is deliberately left as a **comment** in the YAML rather than a
+scored entry. It is genuinely ambiguous between `radio` and a slider, and gets
+an expectation once Phase 18 decides how `select_slider` should treat it.
 
 
 ---

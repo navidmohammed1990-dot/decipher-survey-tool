@@ -1,9 +1,4 @@
-# question_examples.yaml
-#
-# Loaded by app/dataset.py and run as a regression suite by
-# tests/test_dataset_regression.py. Entries that cannot pass yet are listed in
-# EXPECTED_FAILURES there with a reason, so the rest guard against regression
-# today rather than waiting for full coverage.
+# question_examples.yaml (DRAFT for review — not yet sent to Code tab)
 #
 # Each entry = one real-world input pattern, paired with the correct
 # classification and/or output shape. Used two ways:
@@ -13,6 +8,167 @@
 # Sources: Standard_Template_Questions_V1_24Aug26.xml (canonical output
 # shapes), plus real questions found across your 6 uploaded questionnaires
 # and the Tasmania test document.
+
+- id: radio_no_validate_when_no_open_option
+  category: radio
+  description: No "Other, please specify" option present — no validate tag should be emitted at all
+  input: |
+    Q1. Dummy SR Question
+    Option 1   1
+    Option 2   2
+    Option 3   3
+    None of the above   99
+  expected:
+    element: radio
+    validate_tag_present: false
+
+- id: checkbox_no_validate_when_no_open_option
+  category: checkbox
+  description: No "Other, please specify" option present — no validate tag should be emitted at all
+  input: |
+    Q2. Dummy MR Question
+    Option 1
+    Option 2
+    Option 3
+    None of the above
+  expected:
+    element: checkbox
+    validate_tag_present: false
+
+# ---------------------------------------------------------------------------
+# REAL PATTERNS FROM YOUR 6 QUESTIONNAIRES — Question Type Reference doc
+# (categories 2, 4, 5, 6, 7, 10 — added after the Word doc review)
+# ---------------------------------------------------------------------------
+
+- id: checkbox_with_select_n_constraint
+  category: checkbox
+  description: Multi-select with a "SELECT N" instruction and a coded Other row
+  input: |
+    ASK ALL
+    Sent3. Which three areas are most important for Australia Post to get
+    right in your community over the next 4 years? (Please select 3)
+    RANDOMISE	MR, SELECT 3
+    Reliable parcel delivery	1
+    Faster parcel delivery	2
+    Affordability	3
+    Services for older Australians	4
+    Digital services and self-service options	5
+    Supporting local businesses	6
+    Access to parcel lockers and collection points	7
+    Community connection and support	8
+    Making sure services and products are updated / keep up to date
+    with changes in ecommerce 	9
+    Other (specify) OE, ANCHOR BASE	98
+  expected:
+    element: checkbox
+    routing_notes: ["ASK ALL", "RANDOMISE", "MR, SELECT 3"]
+    options:
+      - {text: "Reliable parcel delivery", code: "1"}
+      - {text: "Faster parcel delivery", code: "2"}
+      - {text: "Affordability", code: "3"}
+      - {text: "Services for older Australians", code: "4"}
+      - {text: "Digital services and self-service options", code: "5"}
+      - {text: "Supporting local businesses", code: "6"}
+      - {text: "Access to parcel lockers and collection points", code: "7"}
+      - {text: "Community connection and support", code: "8"}
+      - text: "Making sure services and products are updated / keep up to date with changes in ecommerce"
+        code: "9"
+      - {text: "Other (specify)", code: "98", open: true}
+
+- id: checkbox_grid_dynamic_columns
+  category: checkbox_grid
+  description: Multi-select grid where columns are dynamically piped from an earlier question — tool should extract the static row structure and leave the dynamic piping for the SP
+  input: |
+    GL1d. Below are a number of statements that can be used to describe
+    online retailers of [CATEGORY]. Please select which statements you
+    think apply to each of the following online retailers of [CATEGORY]?
+    Please select all that apply.
+    MR PER STATEMENT, SHOW BRANDS SELECTED AT GL1A. RANDOMISE BRANDS AS
+    PER GL1A AND STATEMENTS CAROUSEL BY STATEMENT
+    01  Has the lowest prices          1
+    02  Offers a large selection       2
+    03  Offers great customer service  3
+    04  Has convenient shipping or delivery options   4
+  expected:
+    element: checkbox_grid
+    routing_notes: ["MR PER STATEMENT, SHOW BRANDS SELECTED AT GL1A. RANDOMISE BRANDS AS PER GL1A AND STATEMENTS CAROUSEL BY STATEMENT"]
+    rows:
+      - {text: "Has the lowest prices", code: "1"}
+      - {text: "Offers a large selection", code: "2"}
+      - {text: "Offers great customer service", code: "3"}
+      - {text: "Has convenient shipping or delivery options", code: "4"}
+    note: "Columns (brand list) are dynamically piped from GL1A in the real survey — not present as static text to extract. The tool should still correctly identify this as a checkbox_grid from the row structure and MR PER STATEMENT signal, leaving the dynamic column piping for the SP to add manually."
+
+- id: textarea_force_response_wording
+  category: textarea
+  description: "\"FORCE RESPONSE\" as a real-world synonym for required — different wording than the template's default"
+  input: |
+    ASK ALL
+    Sent1B. What is the main reason you feel this way about Australia
+    Post?
+    OPEN TEXT	FORCE RESPONSE
+  expected:
+    element: textarea
+    routing_notes: ["ASK ALL", "OPEN TEXT", "FORCE RESPONSE"]
+
+- id: text_unaided_recall_no_tag
+  category: text
+  description: Unaided-recall open end with no options table and no explicit OE/SR/MR tag at all — type inferred purely from wording
+  input: |
+    ASK ALL
+    M1. What brands can you recall seeing advertising or marketing for
+    in the last month?
+  expected:
+    element: text
+    routing_notes: ["ASK ALL"]
+
+- id: number_single_value_no_rows
+  category: number
+  description: Single numeric entry, no options, no rows — the corrected canonical example (an earlier draft mistakenly used a banded-age radio question here)
+  input: |
+    ASK ALL, OE
+    Q1.1. How old are you? Please type your age in years in the space
+    provided.
+  expected:
+    element: number
+    routing_notes: ["ASK ALL, OE"]
+
+- id: number_grid_with_per_row_constraints
+  category: number
+  description: Numeric entry with multiple rows, each row its own min/max constraint, plus a non-numeric "None" row
+  input: |
+    ONUM
+    How many international flights have you taken from [MARKET] in
+    the last 12 months?
+    If you took a return trip, please consider this as two (2) flights.
+    R
+    _1  For Leisure (i.e. holidays or short break, visiting family
+        and friends)     Open numeric response box; min 0 max 200
+    _2  For Business (i.e. conferences, client presentations,
+        business development, client meetings)
+                         Open numeric response box; min 0 max 200
+    991 None, I have not taken any international flights from
+        [MARKET] in the last 12 months
+  expected:
+    element: number
+    rows:
+      - {text: "For Leisure (i.e. holidays or short break, visiting family and friends)", code: "1", min: "0", max: "200"}
+      - {text: "For Business (i.e. conferences, client presentations, business development, client meetings)", code: "2", min: "0", max: "200"}
+      - {text: "None, I have not taken any international flights from [MARKET] in the last 12 months", code: "991"}
+    note: "Row 991 is a non-numeric exclusive option, not a numeric entry itself — should be handled the same way none-of-the-above is handled elsewhere, not treated as a value to be entered."
+
+# PENDING — not added as a scored entry yet, decision needed
+# id: scale_question_ambiguous_radio_or_slider
+# category: UNRESOLVED (radio or select_slider?)
+# source: FF5_x_AP_Ad_Effectiveness_Master_Questionnaire_20260827_PP.docx, A20
+#   A20 How likely are you to remember this ad?
+#   SR, SHOW BRANDED STILLS ABOVE QUESTION
+#   1. Very likely / 2. Likely / 3. Neither likely nor unlikely /
+#   4. Unlikely / 5. Very unlikely
+# This is a real, genuinely ambiguous case — a standalone bipolar scale,
+# tagged SR, formatted as a plain numbered list. Do not add an "expected"
+# outcome here until Phase 18's select_slider classification rule is
+# built and we've decided how it should treat this specific shape.
 
 # ---------------------------------------------------------------------------
 # CORE ELEMENT TYPES — one canonical example each, matched exactly to your
@@ -73,7 +229,7 @@
     Following up an enquiry   3
   expected:
     element: checkbox_grid
-    comment_tag: "${res.MR}"
+    comment_tag: "${res.MRStatement}"
     atleast: "1"
     rows:
       - {text: "Booking a service", code: "1"}

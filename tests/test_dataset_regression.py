@@ -20,10 +20,23 @@ from app.dataset import Example, check, check_generation, check_parsing, load_ex
 #: id -> why it cannot pass yet. An entry here that starts passing is itself a
 #: failure: the note is stale and should be removed.
 EXPECTED_FAILURES: dict[str, str] = {
-    "checkbox_grid_basic": (
-        "Dataset expects ${res.MR}, but the Phase 5 addendum maps checkbox_grid "
-        "to the ${res.MRStatement} variant. One of the two needs correcting - "
-        "this is a specification conflict, not a code defect."
+    "checkbox_with_select_n_constraint": (
+        "A per-row directive written inside the option's own cell - 'Other "
+        "(specify) OE, ANCHOR BASE' - stays glued to the option text. Only a "
+        "directive in a third column is split off today. Needs the row-note "
+        "split to work within a cell, not just across columns."
+    ),
+    "checkbox_grid_dynamic_columns": (
+        "Rows carry a leading row-id column ('01 Has the lowest prices  1') "
+        "with a separate trailing code. Leading ids are only recognised when "
+        "punctuated ('1.', '97.'), so '01 ' stays in the row text. Needs "
+        "block-level detection of a leading id column."
+    ),
+    "number_grid_with_per_row_constraints": (
+        "Three unbuilt patterns at once: a leading code column ('_1', '991'), "
+        "rows that wrap onto a second line without a trailing code to close "
+        "them, and per-row min/max constraints written as prose. The Question "
+        "model has no per-row min/max field either."
     ),
 }
 
@@ -32,7 +45,7 @@ IDS = [example.id for example in EXAMPLES]
 
 
 def test_the_dataset_loads():
-    assert len(EXAMPLES) >= 19
+    assert len(EXAMPLES) >= 27
     assert len({e.id for e in EXAMPLES}) == len(EXAMPLES), "ids must be unique"
 
 
@@ -70,7 +83,7 @@ def test_most_of_the_dataset_passes():
     unexpected = failing - set(EXPECTED_FAILURES)
 
     assert not unexpected, f"newly failing: {sorted(unexpected)}"
-    assert len(EXAMPLES) - len(failing) >= 18, "coverage dropped"
+    assert len(EXAMPLES) - len(failing) >= 24, "coverage dropped"
 
 
 # -- the patterns Phase 13 added, pinned individually ----------------------
