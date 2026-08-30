@@ -222,3 +222,88 @@ def test_none_of_the_above_keeps_its_attributes(element, exclusive):
     assert 'label="r99"' in row
     assert 'randomize="0"' in row
     assert ('exclusive="1"' in row) is exclusive
+
+
+# -- Phase 20b: randomize, and the same gate on the older two categories ---
+
+
+@pytest.mark.parametrize("element", ["radio", "checkbox", "select", "radio_grid", "checkbox_grid"])
+def test_the_opt_out_rows_are_fixed_at_the_end_of_the_list(element):
+    """Confirmed in 20b: they behave like None, not like an ordinary option."""
+    options = [
+        OptionLine(raw_text="Option 1"),
+        OptionLine(raw_text="Don't know"),
+        OptionLine(raw_text="Prefer not to say"),
+        OptionLine(raw_text="None of the above"),
+    ]
+    xml = generate_question(question(element, options))
+
+    for label in ("r97", "r98", "r99"):
+        row = next(line for line in xml.splitlines() if f'label="{label}"' in line)
+        assert 'randomize="0"' in row, f"{label} should not randomise in {element}"
+
+    plain = next(line for line in xml.splitlines() if 'label="r1"' in line)
+    assert "randomize=" not in plain, "an ordinary option still randomises"
+
+
+def test_a_numeric_grids_noanswer_stays_bare():
+    """20b asks for no change here - there is no evidence either way."""
+    options = [
+        OptionLine(raw_text="For Leisure", code="1", min_value="0", max_value="200"),
+        OptionLine(raw_text="Don't know"),
+    ]
+    xml = generate_question(question("number", options))
+
+    assert '<noanswer label="r97">Don\'t know</noanswer>' in xml
+
+
+def test_none_of_the_above_inside_a_real_answer_is_not_the_none_row():
+    """The case named in the brief."""
+    text = "None of the above brands appeal to me"
+    assert default_code(text) is None
+
+    xml = generate_question(
+        question("checkbox", [OptionLine(raw_text="Option 1"), OptionLine(raw_text=text)])
+    )
+    row = next(line for line in xml.splitlines() if "brands appeal" in line)
+
+    assert 'label="r99"' not in row
+    assert "exclusive=" not in row, "a real answer must not be marked exclusive"
+    assert "randomize=" not in row
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Please specify any other brands you have used",
+        "Other supermarkets I shop at, please specify which ones and how often",
+        "None of the above stores are near my home",
+    ],
+)
+def test_the_older_two_categories_now_take_the_same_gate(text):
+    assert default_code(text) is None
+
+
+@pytest.mark.parametrize(
+    "text, suffix",
+    [
+        ("Other (please specify)", 91),
+        ("Other, please specify", 91),
+        ("Other - please specify", 91),
+        ("Other (specify)", 91),
+        ("Other (please specify below)", 91),
+        ("None of the above", 99),
+        ("None of these", 99),
+        ("None of these apply", 99),
+        ("None of the above apply to me", 99),
+    ],
+)
+def test_the_genuine_cases_survive_the_tightening(text, suffix):
+    assert default_code(text) == suffix
+
+
+def test_an_other_specify_row_keeps_its_open_box_after_tightening():
+    xml = generate_question(
+        question("radio", [OptionLine(raw_text="Other (please specify)")])
+    )
+    assert 'open="1"' in xml and 'openSize="25"' in xml

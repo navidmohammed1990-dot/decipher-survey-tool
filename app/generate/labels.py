@@ -52,38 +52,67 @@ OPEN_ATTRS = {"open": "1", "openSize": "25", "randomize": "0"}
 
 
 def is_other_specify(text: str) -> bool:
-    return bool(_OTHER.search(text) and _SPECIFY.search(text))
+    """"Other, please specify" - both words, and little else in the row.
+
+    The second half is Phase 20b: "Please specify any other brands you have
+    used" has both words and is a question, not an other-specify row.
+    """
+    stripped = text.strip()
+    return bool(
+        _OTHER.search(stripped)
+        and _SPECIFY.search(stripped)
+        and _is_the_whole_row(stripped)
+    )
 
 
 def is_none_of_the_above(text: str) -> bool:
-    return bool(_NONE_OF.search(text))
+    """"None of the above" as the row's whole content, not as its opening.
+
+    "None of the above brands appeal to me" is an answer about brands; reading
+    it as the None row would mark a real answer exclusive.
+    """
+    stripped = text.strip()
+    return bool(_NONE_OF.search(stripped)) and _is_the_whole_row(stripped)
 
 
-#: Every way of declining to answer, for the "is that all this row says?"
-#: test below. Wider than the two coded categories on purpose: a row reading
-#: "Don't know / Can't say" is still only an opt-out.
-_ANY_OPT_OUT_PHRASE = re.compile(
+#: Every way of writing one of the four special categories, for the "is that
+#: all this row says?" test below. Wider than any single category on purpose:
+#: a row reading "Don't know / Can't say" is still only an opt-out.
+_CATEGORY_PHRASE = re.compile(
     r"don'?t\s+know|do\s+not\s+know|not\s+sure|unsure"
     r"|prefer\s+not\s+to\s+(?:say|answer)|rather\s+not\s+say"
     r"|can'?t\s+say|cannot\s+say|no\s+opinion"
-    r"|none\s+of\s+(?:the\s+above|these)|not\s+applicable|n/a",
+    r"|none\s+of\s+(?:the\s+above|these)|not\s+applicable|n/a"
+    r"|other|please|specify|below",
     re.IGNORECASE,
 )
 
-#: Words that only join two opt-out phrases together.
-_CONNECTOR = re.compile(r"\b(?:or|and)\b", re.IGNORECASE)
+#: Words that carry no subject of their own: joiners, and the generic tails a
+#: row adds to finish the sentence. "None of these apply" and "None of the
+#: above apply to me" are the None row; "None of the above brands appeal to me"
+#: is about brands, and is not.
+#:
+#: A closed vocabulary, like the phrases above, and the same caveat applies -
+#: it covers the house styles it was written against. Being wrong here costs a
+#: special row its house code and a plainly numbered row appears instead, which
+#: is visible in review; being wrong the other way silently marks a real answer
+#: exclusive.
+_FILLER = re.compile(
+    r"\b(?:or|and|apply|applies|applicable|relevant|to\s+me|for\s+me"
+    r"|of\s+(?:the\s+above|these)|above|these|this|that|it|them)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_the_whole_row(text: str) -> bool:
-    """Whether opt-out phrasing is all this row says.
+    """Whether category phrasing is all this row says.
 
     Anchoring at the start is not enough on its own: "Not sure why the parcel
-    was late, but it arrived" opens with the words and is an ordinary answer.
-    A row that offers a way out has nothing else in it, give or take
-    punctuation and a joining word - "Don't know / Not sure" is still one.
+    was late, but it arrived" opens with the words and is an ordinary answer,
+    as is "None of the above brands appeal to me". A row that *is* one of these
+    categories has nothing else in it, give or take punctuation and filler.
     """
-    remainder = _CONNECTOR.sub(" ", _ANY_OPT_OUT_PHRASE.sub(" ", text))
-    return not re.search(r"[A-Za-z0-9]", remainder)
+    return not re.search(r"[A-Za-z0-9]", _FILLER.sub(" ", _CATEGORY_PHRASE.sub(" ", text)))
 
 
 def is_dont_know(text: str) -> bool:
@@ -187,6 +216,11 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
             if is_checkbox:
                 # Radio needs no exclusive: only one answer is possible anyway.
                 attrs["exclusive"] = "1"
+        elif is_dont_know(text) or is_prefer_not_to_say(text):
+            # Fixed at the end of the list like None is, confirmed in 20b.
+            # No exclusive: only randomize was confirmed, and inventing the
+            # rest is how the per-row min/max shape went wrong.
+            attrs["randomize"] = "0"
 
         # Numbering precedence: a code the source gave, then the r91/r99
         # convention, then sequential. A source that codes Other as 97 means it;

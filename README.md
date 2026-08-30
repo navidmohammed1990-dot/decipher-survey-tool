@@ -996,11 +996,35 @@ suffix chosen is now reserved, so a special row whose house code the source
 already spent falls through to a free number instead of colliding — a plainly
 numbered special row is a much smaller harm than two rows with one identity.
 
-**Open question, not implemented.** `None of the above` carries `randomize="0"`
-(and `exclusive="1"` on checkbox). Whether `Don't know` and `Prefer not to say`
-should too is not in the brief and no real example settles it, so they are
-emitted with the code alone. They arguably should not randomise into the middle
-of a list — worth confirming against a real survey.
+### Phase 20b — randomize, and the same gate everywhere
+
+Confirmed: `Don't know` and `Prefer not to say` are fixed at the end of the
+list like `None of the above`, so all three carry `randomize="0"`:
+
+```xml
+<row label="r97" value="97" randomize="0">Don't know</row>
+<row label="r98" value="98" randomize="0">Prefer not to say</row>
+<row label="r99" value="99" randomize="0">None of the above</row>
+```
+
+Only `randomize` was confirmed, so only `randomize` is emitted — `exclusive`
+stays on `None of the above` alone. A numeric grid's `<noanswer>` is unchanged
+and still bare: no evidence either way for that tag.
+
+The double gate now applies to **all four** categories, closing the asymmetry
+flagged in Phase 20. `None of the above brands appeal to me` is an answer about
+brands, and reading it as the None row would have marked a real answer
+exclusive; `Please specify any other brands you have used` has both of Other's
+words and is a question. Neither triggers now.
+
+The gate strips the category phrasing plus filler that carries no subject of
+its own — joiners, and generic tails like "apply" and "to me" — and requires
+that nothing with a letter or digit survives. That keeps `None of these apply`
+and `None of the above apply to me` as the None row while rejecting the two
+above. The filler list is a closed vocabulary with the usual caveat, but the
+asymmetry in the risk is deliberate: being wrong costs a special row its house
+code and a plainly numbered row shows up in review, where being wrong the other
+way silently marks a real answer exclusive.
 
 ---
 
