@@ -952,6 +952,58 @@ A `number` question with no rows emits exactly what it did before.
 
 ---
 
+## Phase 20 — House default codes
+
+Four row categories get a house code when the source gives none:
+
+| Code | Category | Status |
+|---|---|---|
+| 91 | Other (please specify) | already built, unchanged |
+| 97 | Don't know / Not sure | **new** |
+| 98 | Prefer not to say | **new** |
+| 99 | None of the above | already built, unchanged |
+
+The precedence is unchanged from Bug 3: **an explicit source code always
+wins**, then the house default, then sequential numbering. A9b codes its
+"Don't know" as 98 and keeps it — that is the document's call, not evidence
+that the default should be 98.
+
+All four now live in one `DEFAULT_CODES` table rather than a chain of
+`elif`s, so the convention is stated once and applies to every element that
+generates rows — `radio`, `checkbox`, `select`, both grids, and `number`
+(where an opt-out row is a `<noanswer>` per Phase 19; the numbering rule is
+the same, only the tag differs).
+
+### Opening with the words is not enough
+
+The two new categories are gated twice. The phrase must start the row — "I
+don't know how often I shop there" is a real answer — **and** be essentially
+all the row says. Anchoring alone let "Not sure why the parcel was late, but
+it arrived" through as code 97. So the phrases are removed and what is left
+must hold no letters or digits, which still admits "Don't know / Not sure" and
+"Don't know or prefer not to say" as one category while rejecting "Don't know
+the exact number of parcels".
+
+`Other` and `None of the above` keep their original, looser matching. The brief
+records them as unchanged, and tightening them was not asked for.
+
+### A collision the new codes introduced
+
+A9b's explicitly coded `Don't know` (98) beside an uncoded `Prefer not to say`
+produced **two rows labelled r98**. The `claimed` set from Phase 13 guarded
+only the sequential counter; a house default walked straight past it. Every
+suffix chosen is now reserved, so a special row whose house code the source
+already spent falls through to a free number instead of colliding — a plainly
+numbered special row is a much smaller harm than two rows with one identity.
+
+**Open question, not implemented.** `None of the above` carries `randomize="0"`
+(and `exclusive="1"` on checkbox). Whether `Don't know` and `Prefer not to say`
+should too is not in the brief and no real example settles it, so they are
+emitted with the code alone. They arguably should not randomise into the middle
+of a list — worth confirming against a real survey.
+
+---
+
 ## Project layout
 
 ```

@@ -9,6 +9,7 @@ XML shapes stay declarative.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.models.survey import OptionLine
@@ -20,7 +21,30 @@ _SPECIFY = re.compile(r"\bspecify\b", re.IGNORECASE)
 #: "None of the above" / "None of these".
 _NONE_OF = re.compile(r"none\s+of\s+(?:the\s+above|these)", re.IGNORECASE)
 
+#: "Don't know" / "Do not know" / "Not sure".
+#:
+#: Anchored at the start, unlike the two above. A row that offers this as an
+#: answer says so first; "I don't know how often I shop there" is a real
+#: answer that happens to contain the words, and must not be read as one.
+_DONT_KNOW = re.compile(
+    r"^(?:don'?t\s+know|do\s+not\s+know|not\s+sure|unsure)\b", re.IGNORECASE
+)
+
+#: "Prefer not to say", and the same thought written as a refusal.
+_PREFER_NOT = re.compile(
+    r"^(?:prefer\s+not\s+to\s+(?:say|answer)|rather\s+not\s+say)\b", re.IGNORECASE
+)
+
+#: "Not applicable" / "N/A", and a "None…" that is not "none of the above".
+#: These have no default code of their own - they only mark a row as an
+#: opt-out for :func:`is_opt_out`.
+_OTHER_OPT_OUT = re.compile(
+    r"^(?:none\b|not\s+applicable\b|n/?a\b)", re.IGNORECASE
+)
+
 OTHER_LABEL_SUFFIX = 91
+DONT_KNOW_LABEL_SUFFIX = 97
+PREFER_NOT_LABEL_SUFFIX = 98
 NONE_LABEL_SUFFIX = 99
 
 #: Attributes added to an "other, please specify" row.
@@ -35,26 +59,81 @@ def is_none_of_the_above(text: str) -> bool:
     return bool(_NONE_OF.search(text))
 
 
-#: An opt-out a numeric question offers instead of a figure: "Don't know",
-#: "None, I have not taken any...", "Prefer not to say". Anchored at the start
-#: because an opt-out row says so first - "I don't know the exact figure" is
-#: prose, not an opt-out.
-#:
-#: A vocabulary, and therefore the kind of thing that only ever covers the
-#: house styles it was written against. It is a second opinion here, not the
-#: test: a row that states no range where its siblings do is already an
-#: opt-out on structure alone. This only catches the case where no row states
-#: one.
-_OPT_OUT = re.compile(
-    r"^(?:none\b|don'?t\s+know\b|not\s+sure\b|prefer\s+not\b"
-    r"|not\s+applicable\b|n/?a\b)",
+#: Every way of declining to answer, for the "is that all this row says?"
+#: test below. Wider than the two coded categories on purpose: a row reading
+#: "Don't know / Can't say" is still only an opt-out.
+_ANY_OPT_OUT_PHRASE = re.compile(
+    r"don'?t\s+know|do\s+not\s+know|not\s+sure|unsure"
+    r"|prefer\s+not\s+to\s+(?:say|answer)|rather\s+not\s+say"
+    r"|can'?t\s+say|cannot\s+say|no\s+opinion"
+    r"|none\s+of\s+(?:the\s+above|these)|not\s+applicable|n/a",
     re.IGNORECASE,
 )
 
+#: Words that only join two opt-out phrases together.
+_CONNECTOR = re.compile(r"\b(?:or|and)\b", re.IGNORECASE)
+
+
+def _is_the_whole_row(text: str) -> bool:
+    """Whether opt-out phrasing is all this row says.
+
+    Anchoring at the start is not enough on its own: "Not sure why the parcel
+    was late, but it arrived" opens with the words and is an ordinary answer.
+    A row that offers a way out has nothing else in it, give or take
+    punctuation and a joining word - "Don't know / Not sure" is still one.
+    """
+    remainder = _CONNECTOR.sub(" ", _ANY_OPT_OUT_PHRASE.sub(" ", text))
+    return not re.search(r"[A-Za-z0-9]", remainder)
+
+
+def is_dont_know(text: str) -> bool:
+    stripped = text.strip()
+    return bool(_DONT_KNOW.match(stripped)) and _is_the_whole_row(stripped)
+
+
+def is_prefer_not_to_say(text: str) -> bool:
+    stripped = text.strip()
+    return bool(_PREFER_NOT.match(stripped)) and _is_the_whole_row(stripped)
+
+
+#: The house code each special category gets *when the source gives none*.
+#: Order matters only for a row that reads as two categories at once; the
+#: first match wins, and these are written most-specific first.
+#:
+#: This is the whole of the convention, in one place. A source code always
+#: outranks it - see :func:`_explicit_code` and the precedence in
+#: :func:`label_rows`.
+DEFAULT_CODES: tuple[tuple[int, Callable[[str], bool]], ...] = (
+    (OTHER_LABEL_SUFFIX, is_other_specify),
+    (NONE_LABEL_SUFFIX, is_none_of_the_above),
+    (DONT_KNOW_LABEL_SUFFIX, is_dont_know),
+    (PREFER_NOT_LABEL_SUFFIX, is_prefer_not_to_say),
+)
+
+
+def default_code(text: str) -> int | None:
+    """The house code this option gets if the source gave it none."""
+    for suffix, matches in DEFAULT_CODES:
+        if matches(text):
+            return suffix
+    return None
+
 
 def is_opt_out(text: str) -> bool:
-    """Whether this row offers a way out of answering rather than an answer."""
-    return bool(_OPT_OUT.match(text.strip())) or is_none_of_the_above(text)
+    """Whether this row offers a way out of answering rather than an answer.
+
+    Broader than the categories that carry a default code: "Not applicable"
+    and a bare "None, I have not taken any..." are opt-outs too, they just
+    have no house code of their own.
+
+    A vocabulary, and therefore the kind of thing that only ever covers the
+    house styles it was written against. In a numeric grid it is the second
+    opinion, not the test: a row that states no range where its siblings do is
+    already an opt-out on structure alone.
+    """
+    if is_dont_know(text) or is_prefer_not_to_say(text) or is_none_of_the_above(text):
+        return True
+    return bool(_OTHER_OPT_OUT.match(text.strip()))
 
 
 @dataclass
@@ -88,10 +167,11 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
     labelled: list[LabelledLine] = []
     counter = 0
 
-    # Suffixes the source already claimed. Sequential numbering has to step
-    # over them: a coded "Male | 1" beside an uncoded "Other" was handing both
-    # the label r1, which is two rows with the same identity.
+    # Suffixes the source already claimed. Nothing chosen here may reuse one:
+    # a coded "Male | 1" beside an uncoded "Other" was handing both the label
+    # r1, which is two rows with the same identity.
     claimed = {code for code in (_explicit_code(option) for option in options) if code}
+    taken = set(claimed)
 
     for option in options:
         text = option.raw_text
@@ -112,17 +192,23 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
         # convention, then sequential. A source that codes Other as 97 means it;
         # renumbering it to 3 would break the data tables downstream.
         explicit = _explicit_code(option)
+        house = default_code(text)
         if explicit is not None:
             suffix = explicit
-        elif is_other_specify(text):
-            suffix = OTHER_LABEL_SUFFIX
-        elif is_none_of_the_above(text):
-            suffix = NONE_LABEL_SUFFIX
+        elif house is not None and house not in taken:
+            suffix = house
         else:
+            # Either an ordinary option, or a special row whose house code the
+            # source already spent elsewhere - A9b codes "Don't know" as 98,
+            # so an uncoded "Prefer not to say" in the same question cannot
+            # also be r98. Two rows with one label is the worse outcome, so it
+            # falls through to a free number rather than colliding.
             counter += 1
-            while counter in claimed:
+            while counter in taken:
                 counter += 1
             suffix = counter
+
+        taken.add(suffix)
 
         labelled.append(
             LabelledLine(option=option, label=f"r{suffix}", suffix=suffix, attrs=attrs)
