@@ -697,19 +697,17 @@ turns those into the labels and attributes the template calls for. Which
 *element* the model picks is judgment and needs a real runtime, so it is
 reported rather than faked.
 
-**24 of 27 entries pass.** The three that do not are listed in
-`EXPECTED_FAILURES` with their reasons, so the rest guard against regression
-now. Each is an unbuilt pattern rather than a defect in working code:
+**26 of 27 entries pass.** The one that does not is listed in
+`EXPECTED_FAILURES` with its reason, so the rest guard against regression now:
 
 | Entry | What it needs |
 |---|---|
-| `checkbox_with_select_n_constraint` | A per-row directive written *inside* the option's own cell — `Other (specify) OE, ANCHOR BASE` — stays glued to the option text. Only a directive in a third column is split off today. |
-| `checkbox_grid_dynamic_columns` | Rows carry a leading row-id column (`01 Has the lowest prices  1`) alongside a separate trailing code. Leading ids are recognised only when punctuated (`1.`, `97.`), so `01 ` stays in the text. |
-| `number_grid_with_per_row_constraints` | Three unbuilt patterns at once: a leading code column (`_1`, `991`), rows wrapping onto a second line with no trailing code to close them, and per-row min/max written as prose — which the `Question` model has no field for. |
+| `number_grid_with_per_row_constraints` | Per-row min/max constraints written as prose, on rows that wrap without a trailing code to close them. The `Question` model has no per-row min/max field, so this needs a model change and not only parsing — scheduled as its own phase. |
 
 The earlier `checkbox_grid_basic` conflict is **resolved**: the dataset now
 expects `${res.MRStatement}`, matching the Phase 5 addendum, and the entry
-passes.
+passes. `checkbox_with_select_n_constraint` and `checkbox_grid_dynamic_columns`
+were fixed by the row cleanups below.
 
 An entry that starts passing while still listed fails the suite, so the notes
 cannot go stale.
@@ -827,6 +825,54 @@ Looking for other places where a specific example decides something:
 | `MIN_FRAGMENT_CHARS = 25` in `wrapping.py` | **fixed** — calibrated to `S2_AGE BANDS` and one long option, so it missed every wrap in a narrow table column. Now measured against the block's own widest line: a line wraps at the margin, so half an option is long *for its block*. |
 | `ROUTING_KEYWORDS`, `TYPE_TAGS` | **acceptable** — Phase 7 hints, evidence for the AI, never gates. The disagreement net exists for exactly when they mislead. |
 | `_OTHER` / `_NONE_OF` in `labels.py` | **acceptable** — r91/r99 is a house convention with fixed wording, and explicit source codes already outrank it. |
+
+---
+
+## Row cleanups — three fixes the 27-entry dataset exposed
+
+All three are **reflow**: they change only where one line ends and the next
+begins. None decides a role — that stays the classifier's job.
+
+### A wrapped title no longer swallows the routing line
+
+```
+Sent3. Which three areas are most important for Australia Post to get
+right in your community over the next 4 years? (Please select 3)
+RANDOMISE	MR, SELECT 3
+```
+
+The third line carried a trailing code, so it looked like the completion of a
+wrapped option and was glued onto the title — a wrong answer in live output.
+The merge test was applied to the *first* half of a candidate pair but never
+the second; it now applies to both.
+
+### A directive inside an option's own cell
+
+`Other (specify) OE, ANCHOR BASE	98` is one cell plus a code in the source,
+but only `Other (specify)` is the option. It now splits into the ordinary
+`text | code | note` shape that a third column already produced. Where the
+directive starts is asked of the type-marker detector rather than answered by a
+list of known directive words, so a house style spelling its own differently
+still splits.
+
+### A leading row-id column
+
+```
+01  Has the lowest prices          1
+02  Offers a large selection       2
+```
+
+The left column is the questionnaire's own row numbering, not part of the row's
+wording. Two things together make it a column, and **both** are required:
+
+1. it is a separate cell — a tab or a run of spaces, read from the raw line
+   before whitespace collapsing destroys the evidence; and
+2. its number **repeats the code** on every coded row in the block.
+
+Either test alone lets something real through. `1 year  1` passes the second
+but not the first; a band list (`18 to 24 years  1`) passes neither. Three rows
+must agree, and a single row that disagrees leaves the whole block untouched —
+a visible stray id is a far smaller harm than silently wrong row wording.
 
 ---
 

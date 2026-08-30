@@ -67,8 +67,18 @@ def _can_continue(line: SourceLine, min_chars: float) -> bool:
         # line already has structure — a code, a per-row note — and is
         # therefore complete rather than half of something.
         return False
-    # Programmer notes and type markers stand alone.
-    return not (line.features.matches_routing_keyword or line.features.matches_type_tag_pattern)
+    return not _stands_alone(line)
+
+
+def _stands_alone(line: SourceLine) -> bool:
+    """Whether this line is a programmer note or type marker in its own right.
+
+    True of either half of a candidate merge: a wrapped title followed by
+    "RANDOMISE  MR, SELECT 3" used to be glued into one line, because only the
+    first half was ever checked. The routing line carried a trailing code, so
+    it looked like the completion of a wrap.
+    """
+    return line.features.matches_routing_keyword or line.features.matches_type_tag_pattern
 
 
 def _bare_code(text: str) -> tuple[str, str] | None:
@@ -114,6 +124,7 @@ def merge_wrapped_options(lines: list[SourceLine]) -> list[SourceLine]:
             position > 0
             and following is not None
             and _can_continue(line, min_chars)
+            and not _stands_alone(following)
             and _completes(following)
         ):
             merged.append(_join(line, following))

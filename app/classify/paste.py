@@ -72,6 +72,33 @@ class PastedQuestion(BaseModel):
     """True when the paste carried no label and one was supplied."""
 
 
+def _split_trailing_directive(text: str) -> tuple[str, str] | None:
+    """An option's own text, and a directive appended to the same cell.
+
+    "Other (specify) OE, ANCHOR BASE" is one cell in the source, but only
+    "Other (specify)" is the option - the rest speaks to the programmer.
+    Splitting it into the ordinary text | code | note shape is reflow, the same
+    as rejoining a wrapped option; it decides no roles.
+
+    Where the directive starts is asked of the type-marker detector rather than
+    answered by a list of known directive words, so a house style that spells
+    its own differently still splits at the marker.
+    """
+    from app.classify.features import detect_type_tag_span
+
+    found = detect_type_tag_span(text)
+    if found is None:
+        return None
+
+    _, start, _ = found
+    before = text[:start].strip(" ,;:-\t")
+    after = text[start:].strip()
+    if not before or not after:
+        # A cell that is only a marker is a type signal, not an option.
+        return None
+    return before, after
+
+
 def join_cells(line: str) -> str:
     """Collapse a copied table row into one line: ``Male\\t1`` -> ``Male | 1``.
 
@@ -80,7 +107,7 @@ def join_cells(line: str) -> str:
     """
     cells = [cell.strip() for cell in _CELL_SEPARATOR.split(line) if cell and cell.strip()]
     if len(cells) > 1:
-        return " | ".join(cells)
+        return " | ".join(_with_directive_split(cells))
 
     row_note = _ALIGNED_ROW_NOTE.match(line)
     if row_note:
@@ -88,7 +115,8 @@ def join_cells(line: str) -> str:
 
     aligned = _ALIGNED_CODE.match(line)
     if aligned:
-        return f"{aligned.group('text')} | {aligned.group('code')}"
+        cells = [aligned.group("text"), aligned.group("code")]
+        return " | ".join(_with_directive_split(cells))
 
     columns = [cell.strip() for cell in _ALIGNED_COLUMNS.split(line.strip()) if cell.strip()]
     if len(columns) > 2:
@@ -96,26 +124,37 @@ def join_cells(line: str) -> str:
     return line.strip()
 
 
+def _with_directive_split(cells: list[str]) -> list[str]:
+    """Cells with a directive lifted out of the option's own text cell."""
+    if len(cells) != 2 or not cells[1].isdigit():
+        return cells
+    split = _split_trailing_directive(cells[0])
+    return [split[0], cells[1], split[1]] if split else cells
+
+
 def normalise_lines(text: str) -> list[str]:
     """Pasted text as clean, non-empty lines with table rows kept whole."""
-    return [line for block in paragraph_blocks(text) for line in block]
+    return [line for block in paragraph_blocks(text) for line in join_block(block)]
 
 
 def paragraph_blocks(text: str) -> list[list[str]]:
-    """Pasted text grouped by blank-line gaps.
+    """Pasted text grouped by blank-line gaps, each line still as pasted.
 
     Blank lines are the one segmentation signal every questionnaire uses,
     whatever it calls its questions. Relying on a label pattern alone meant a
     house style the regex did not know - Sent1, Sent1B, Sent2 - collapsed five
     questions into one block with duplicate row labels.
+
+    Lines are left raw here because column gaps are evidence: once whitespace
+    is collapsed there is nothing to tell "01  Has the lowest prices" (two
+    columns) from "1 year" (one).
     """
     blocks: list[list[str]] = []
     current: list[str] = []
 
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        joined = collapse_whitespace(join_cells(raw))
-        if joined:
-            current.append(joined)
+        if raw.strip():
+            current.append(raw)
         elif current:
             blocks.append(current)
             current = []
@@ -123,6 +162,14 @@ def paragraph_blocks(text: str) -> list[list[str]]:
     if current:
         blocks.append(current)
     return blocks
+
+
+def join_block(lines: list[str]) -> list[str]:
+    """One raw block as clean, joined lines, table rows kept whole."""
+    joined = [
+        collapse_whitespace(join_cells(line)) for line in strip_leading_id_column(lines)
+    ]
+    return [line for line in joined if line]
 
 
 def _strip_strike(text: str) -> tuple[str, bool]:
@@ -235,6 +282,61 @@ def expand_scale_lines(lines: list[str]) -> list[str]:
     return expanded
 
 
+#: Columns as the source laid them out: a tab, or a run of spaces. Read from
+#: the raw line, before whitespace collapsing removes the evidence.
+_RAW_COLUMNS = re.compile(r"[\t]+|[ ]{2,}")
+
+#: The leading id and the gap after it, to remove once the block has agreed.
+_LEADING_ID = re.compile(r"^[ \t]*\d{1,3}(?:[\t]+|[ ]{2,})")
+
+#: How many rows must agree before a leading column counts as one. Two could
+#: be coincidence; this is asked of the block, never of a line on its own.
+MIN_ID_COLUMN_ROWS = 3
+
+
+def strip_leading_id_column(lines: list[str]) -> list[str]:
+    """Drop a leading row-id column, when the block as a whole has one.
+
+    A grid's rows sometimes arrive numbered twice - an id on the left and the
+    real code on the right:
+
+        01  Has the lowest prices          1
+        02  Offers a large selection       2
+
+    The left column is the questionnaire's own row numbering, not part of the
+    row's wording. Two things together make it a column rather than an option
+    that happens to open with a number: it is a *separate cell*, and its number
+    *repeats the code* on every coded row in the block. Either test alone lets
+    something real through - "1 year  1" would lose its "1" on the second test,
+    and a band list on neither - so both are required, and any row that
+    disagrees leaves the whole block untouched. Where they disagree the text
+    stays as pasted: a visible stray id is a much smaller harm than silently
+    wrong row wording.
+    """
+    coded = [line for line in lines if _is_coded_row(line)]
+    if len(coded) < MIN_ID_COLUMN_ROWS:
+        return lines
+
+    for line in coded:
+        cells = _raw_cells(line)
+        if len(cells) < 3 or not cells[0].isdigit():
+            return lines
+        if int(cells[0]) != int(cells[-1]):
+            return lines
+
+    return [_LEADING_ID.sub("", line, count=1) if line in coded else line for line in lines]
+
+
+def _raw_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in _RAW_COLUMNS.split(line.strip()) if cell.strip()]
+
+
+def _is_coded_row(line: str) -> bool:
+    """Whether this raw line ends in a column holding just a number."""
+    cells = _raw_cells(line)
+    return len(cells) > 1 and cells[-1].isdigit()
+
+
 def _all_coded(lines: list[str]) -> bool:
     """Whether every line here already carries a code.
 
@@ -264,7 +366,9 @@ def split_questions(
     other way round: a label the regex cannot read must not be able to merge
     several questions into one.
     """
-    raw_blocks = [expand_scale_lines(block) for block in paragraph_blocks(text)]
+    raw_blocks = [
+        expand_scale_lines(join_block(block)) for block in paragraph_blocks(text)
+    ]
     raw_blocks = [block for block in raw_blocks if block]
     if not raw_blocks:
         return [], ["Nothing to convert - the pasted text is empty."]
