@@ -18,15 +18,9 @@ import pytest
 from app.dataset import Example, check, check_generation, check_parsing, load_examples
 
 #: id -> why it cannot pass yet. An entry here that starts passing is itself a
-#: failure: the note is stale and should be removed.
-EXPECTED_FAILURES: dict[str, str] = {
-    "number_grid_with_per_row_constraints": (
-        "Per-row min/max constraints written as prose, on rows that wrap onto "
-        "a second line without a trailing code to close them. The Question "
-        "model has no per-row min/max field, so this needs a model change and "
-        "not only parsing - scheduled as its own phase."
-    ),
-}
+#: failure: the note is stale and should be removed. Empty means every entry
+#: passes on everything checkable without a live model.
+EXPECTED_FAILURES: dict[str, str] = {}
 
 EXAMPLES = load_examples()
 IDS = [example.id for example in EXAMPLES]
@@ -71,7 +65,7 @@ def test_most_of_the_dataset_passes():
     unexpected = failing - set(EXPECTED_FAILURES)
 
     assert not unexpected, f"newly failing: {sorted(unexpected)}"
-    assert len(EXAMPLES) - len(failing) >= 26, "coverage dropped"
+    assert len(EXAMPLES) - len(failing) >= 27, "coverage dropped"
 
 
 # -- the patterns Phase 13 added, pinned individually ----------------------

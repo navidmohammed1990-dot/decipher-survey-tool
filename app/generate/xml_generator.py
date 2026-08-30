@@ -88,6 +88,10 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
     "number": ElementSpec(
         tag="number",
         attrs={"size": "3", "optional": "0"},
+        # A numeric question may ask for one figure or for one per row. With no
+        # rows this emits exactly what it did before; with rows it emits them,
+        # each carrying its own min/max where the source stated one.
+        has_rows=True,
     ),
     "select": ElementSpec(
         tag="select",

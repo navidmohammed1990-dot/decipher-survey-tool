@@ -61,15 +61,16 @@ def parsed_lines(example: Example) -> list:
     return [line for block in blocks for line in block.lines]
 
 
-def _text_and_code(line) -> tuple[str, str | None]:
-    option = OptionLine.from_text(line.text)
-    return option.raw_text, option.code
+def parsed_options(example: Example) -> dict[str, OptionLine]:
+    """Each parsed answer line, keyed by the text it recovered."""
+    options = [OptionLine.from_text(line.text) for line in parsed_lines(example)]
+    return {option.raw_text: option for option in options}
 
 
 def check_parsing(example: Example) -> list[str]:
     """Every expected answer text must survive parsing, with its code."""
     failures: list[str] = []
-    found = dict(_text_and_code(line) for line in parsed_lines(example))
+    found = parsed_options(example)
 
     for entry in example.answer_entries + example.expected_lines("cols"):
         text = entry.get("text")
@@ -79,11 +80,24 @@ def check_parsing(example: Example) -> list[str]:
             failures.append(f"option text not recovered: {text!r}")
             continue
 
+        option = found[text]
         wanted = entry.get("code") if "code" in entry else entry.get("value")
-        if wanted is not None and found[text] != str(wanted):
+        if wanted is not None and option.code != str(wanted):
             failures.append(
-                f"{text!r} code was {found[text]!r}, expected {str(wanted)!r}"
+                f"{text!r} code was {option.code!r}, expected {str(wanted)!r}"
             )
+
+        # A stated range must survive too, and a row with none must not
+        # acquire one - an unconstrained "None of these" row is not a
+        # numeric entry.
+        for field, attribute in (("min", "min_value"), ("max", "max_value")):
+            expected = entry.get(field)
+            actual = getattr(option, attribute)
+            expected = str(expected) if expected is not None else None
+            if expected != actual:
+                failures.append(
+                    f"{text!r} {field} was {actual!r}, expected {expected!r}"
+                )
     return failures
 
 
@@ -99,6 +113,8 @@ def build_question(example: Example) -> Question:
             raw_text=entry["text"],
             code=str(entry["code"]) if entry.get("code") is not None else
                  (str(entry["value"]) if entry.get("value") is not None else None),
+            min_value=str(entry["min"]) if entry.get("min") is not None else None,
+            max_value=str(entry["max"]) if entry.get("max") is not None else None,
         )
         for entry in entries if entry.get("text")
     ]
@@ -148,6 +164,10 @@ def check_generation(example: Example) -> list[str]:
             failures.append(f"open attribute missing on {label}")
         if entry.get("exclusive") and 'exclusive="1"' not in xml:
             failures.append(f"exclusive attribute missing on {label}")
+        for field in ("min", "max"):
+            value = entry.get(field)
+            if value is not None and f'{field}="{value}"' not in xml:
+                failures.append(f"{field} attribute missing on {label}")
 
     return failures
 

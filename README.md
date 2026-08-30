@@ -697,20 +697,13 @@ turns those into the labels and attributes the template calls for. Which
 *element* the model picks is judgment and needs a real runtime, so it is
 reported rather than faked.
 
-**26 of 27 entries pass.** The one that does not is listed in
-`EXPECTED_FAILURES` with its reason, so the rest guard against regression now:
+**All 27 entries pass** and `EXPECTED_FAILURES` is empty. An entry that starts
+passing while still listed fails the suite, so the list cannot go stale in
+either direction.
 
-| Entry | What it needs |
-|---|---|
-| `number_grid_with_per_row_constraints` | Per-row min/max constraints written as prose, on rows that wrap without a trailing code to close them. The `Question` model has no per-row min/max field, so this needs a model change and not only parsing — scheduled as its own phase. |
-
-The earlier `checkbox_grid_basic` conflict is **resolved**: the dataset now
-expects `${res.MRStatement}`, matching the Phase 5 addendum, and the entry
-passes. `checkbox_with_select_n_constraint` and `checkbox_grid_dynamic_columns`
-were fixed by the row cleanups below.
-
-An entry that starts passing while still listed fails the suite, so the notes
-cannot go stale.
+The harness checks each row's `min`/`max` as well as its text and code — both
+that a stated range survives parsing and reaches the XML, and that a row with
+no range does not acquire one.
 
 `A20` — a standalone bipolar scale tagged `SR` and formatted as a plain
 numbered list — is deliberately left as a **comment** in the YAML rather than a
@@ -873,6 +866,73 @@ Either test alone lets something real through. `1 year  1` passes the second
 but not the first; a band list (`18 to 24 years  1`) passes neither. Three rows
 must agree, and a single row that disagrees leaves the whole block untouched —
 a visible stray id is a far smaller harm than silently wrong row wording.
+
+---
+
+## Phase 19 — Numeric grids with per-row ranges
+
+One numeric question can ask for a single figure or for one figure per row,
+each row with its own range. The source writes it like this:
+
+```
+_1  For Leisure (i.e. holidays or short break, visiting family
+    and friends)     Open numeric response box; min 0 max 200
+_2  For Business (i.e. conferences, client presentations,
+    business development, client meetings)
+                     Open numeric response box; min 0 max 200
+991 None, I have not taken any international flights from
+    [MARKET] in the last 12 months
+```
+
+### A code column on the left, not the right
+
+This is **not** the leading-id column of the row cleanups above, and the same
+mechanism does not apply. There the leading number *repeats* a code on the
+right and is therefore redundant; here it *is* the code and there is nothing on
+the right. `_1` is not a bare digit and `991` repeats nothing, so the id-column
+test correctly declines to touch either.
+
+Pairwise wrap-merging cannot read this shape either: the continuations carry no
+code to close them, and `_2` needs three lines joined rather than two. So the
+rows are grouped from the **column**, not guessed line by line — once the
+column is established, a line that starts a code begins a row and an indented
+line continues the one above. That reads a two-line and a three-line wrap the
+same way.
+
+A block only counts as having a code column when all of this holds: no trailing
+codes anywhere (that is the ordinary case, already handled), at least three
+rows sharing the shape at one indent, and at least one led by a token that
+cannot be read as prose — underscored, zero-padded, or set off by a real column
+gap. Without that last test `18 to 24 years` and `1 year` both look like a code
+plus text.
+
+### The range
+
+`OptionLine` gains `min_value` / `max_value`. Unlike `row_note`, these **are**
+emitted: they constrain what the respondent may enter, so they belong in the
+XML rather than in a note to the programmer. A cell stating a range is lifted
+out of the row's wording the same way a directive in an option's own cell is.
+Only a complete pair counts — a lone `max 200` leaves the range open at one
+end, which is not a reason to invent a zero.
+
+```xml
+<number label="Q20" size="3" optional="0">
+  <title>How many international flights…</title>
+  <comment>${res.Open}</comment>
+  <row label="r1" min="0" max="200">For Leisure…</row>
+  <row label="r2" min="0" max="200">For Business…</row>
+  <row label="r991">None, I have not taken any international flights…</row>
+</number>
+```
+
+**Unconfirmed against house convention.** `<row min max>` under `<number>` is
+the brief's proposed shape, carried through as specified. The canonical
+template (`Standard_Template_Questions_V1_24Aug26.xml`) is not in this
+repository, so nothing here verifies it — including whether `size="3"` is still
+right on a `<number>` that has rows. Worth confirming against a real generated
+survey before relying on it.
+
+A `number` question with no rows emits exactly what it did before.
 
 ---
 

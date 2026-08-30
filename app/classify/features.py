@@ -180,6 +180,25 @@ def color_name(hex_value: str | None) -> str | None:
     return None if name in ("black", "white") else name
 
 
+#: A numeric range stated in prose: "min 0 max 200", "Min: 0, Max: 200",
+#: "0 to 200". Questionnaires write the range as a directive beside the row
+#: rather than as a field, so it has to be read out of the words.
+_BOUNDS_RE = re.compile(
+    r"\bmin(?:imum)?\b\D{0,4}(?P<min>\d+)\D{0,12}?\bmax(?:imum)?\b\D{0,4}(?P<max>\d+)",
+    re.IGNORECASE,
+)
+
+
+def detect_numeric_bounds(text: str) -> tuple[str, str] | None:
+    """The min and max a line states, if it states both.
+
+    Only a pair counts. A lone "max 200" leaves the range open at one end,
+    which is not something to guess a zero for.
+    """
+    match = _BOUNDS_RE.search(text)
+    return (match.group("min"), match.group("max")) if match else None
+
+
 def detect_trailing_code(text: str) -> str | None:
     """The code a source line gave an option, if it gave one.
 

@@ -86,6 +86,13 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
                 # Radio needs no exclusive: only one answer is possible anyway.
                 attrs["exclusive"] = "1"
 
+        # A range the source stated for this row alone. Unlike a row_note this
+        # constrains the answer, so it is emitted rather than shown for
+        # reference; a row without one is left unconstrained.
+        if option.min_value is not None and option.max_value is not None:
+            attrs["min"] = option.min_value
+            attrs["max"] = option.max_value
+
         # Numbering precedence: a code the source gave, then the r91/r99
         # convention, then sequential. A source that codes Other as 97 means it;
         # renumbering it to 3 would break the data tables downstream.

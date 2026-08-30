@@ -166,6 +166,16 @@ def paragraph_blocks(text: str) -> list[list[str]]:
 
 def join_block(lines: list[str]) -> list[str]:
     """One raw block as clean, joined lines, table rows kept whole."""
+    rows = code_column_rows(lines)
+    if rows is not None:
+        head = lines[: lines.index(rows[0][0])]
+        tail = lines[lines.index(rows[-1][-1]) + 1 :]
+        return [
+            *(line for line in (collapse_whitespace(join_cells(l)) for l in head) if line),
+            *(assemble_code_column_row(row) for row in rows),
+            *(line for line in (collapse_whitespace(join_cells(l)) for l in tail) if line),
+        ]
+
     joined = [
         collapse_whitespace(join_cells(line)) for line in strip_leading_id_column(lines)
     ]
@@ -325,6 +335,113 @@ def strip_leading_id_column(lines: list[str]) -> list[str]:
             return lines
 
     return [_LEADING_ID.sub("", line, count=1) if line in coded else line for line in lines]
+
+
+#: A code column on the left of a row: the "_1" in "_1  For Leisure...", the
+#: "991" in "991 None, I have not taken...". Distinct from the id column above:
+#: there the leading number *repeats* a code on the right, so it is redundant
+#: and dropped; here it *is* the code and there is none on the right.
+_LEADING_CODE = re.compile(
+    r"^(?P<indent>[ \t]*)_?(?P<code>\d{1,3})(?:[\t]+|[ ]+)(?P<text>\S.*?)\s*$"
+)
+
+#: A leading token that cannot be prose: underscored ("_1"), zero-padded
+#: ("01"), or set off by a real column gap. At least one row must carry one
+#: before the block is read as having a code column at all - without that,
+#: "18 to 24 years" and "1 year" both look like a code plus text.
+_UNAMBIGUOUS_CODE = re.compile(r"^[ \t]*(?:_\d{1,3}[ \t]|0\d{1,2}[ \t]|\d{1,3}(?:[\t]|[ ]{2,}))")
+
+#: How many rows must share the shape before it counts as a column.
+MIN_CODE_COLUMN_ROWS = 3
+
+
+def code_column_rows(lines: list[str]) -> list[list[str]] | None:
+    """Group a block's lines into rows led by a code column, if it has one.
+
+    Some questionnaires put the row's code on the *left* and nothing on the
+    right, and let long rows wrap - sometimes over three lines:
+
+        _1  For Leisure (i.e. holidays or short break, visiting family
+            and friends)     Open numeric response box; min 0 max 200
+        _2  For Business (i.e. conferences, client presentations,
+            business development, client meetings)
+                             Open numeric response box; min 0 max 200
+        991 None, I have not taken any international flights from
+            [MARKET] in the last 12 months
+
+    Pairwise wrap-merging cannot see this: the continuations carry no code to
+    close them, and two of these rows need three lines joined, not two. Once
+    the code column is established the structure is unambiguous though - a
+    line that starts a code is a new row, an indented line continues the one
+    above - so the rows are grouped from the column rather than guessed at
+    line by line.
+
+    Returns ``None`` unless the block really has such a column: at least three
+    rows sharing the shape, at least one of them led by a token that cannot be
+    read as prose, and no trailing codes anywhere (those are the ordinary
+    right-hand-code case, already handled).
+    """
+    if any(_is_coded_row(line) for line in lines):
+        return None
+
+    starts = [
+        position for position, line in enumerate(lines) if _LEADING_CODE.match(line)
+    ]
+    if len(starts) < MIN_CODE_COLUMN_ROWS:
+        return None
+    if not any(_UNAMBIGUOUS_CODE.match(lines[position]) for position in starts):
+        # Every start could be read as prose - "18 to 24 years", "1 year".
+        # Without one token that could not, this is not a column.
+        return None
+
+    indent = _indent_of(lines[starts[0]])
+    if any(_indent_of(lines[position]) != indent for position in starts):
+        return None
+
+    rows: list[list[str]] = []
+    for position in range(starts[0], len(lines)):
+        line = lines[position]
+        if position in starts:
+            rows.append([line])
+        elif rows and _indent_of(line) > indent:
+            # Only a line set in from the column continues a row. One flush
+            # with it is the block moving on to something else.
+            rows[-1].append(line)
+        else:
+            break
+
+    return rows if len(rows) >= MIN_CODE_COLUMN_ROWS else None
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def assemble_code_column_row(row: list[str]) -> str:
+    """One code-column row as a single ``text | code | bounds`` line.
+
+    Cells stating a numeric range are lifted out of the wording, the same way
+    a directive in an option's own cell is: "Open numeric response box; min 0
+    max 200" sits in its own column beside the row, and is a constraint on the
+    answer, not part of what the row says.
+    """
+    from app.classify.features import detect_numeric_bounds
+
+    head = _LEADING_CODE.match(row[0])
+    assert head is not None
+    code = head.group("code")
+
+    words: list[str] = []
+    bounds: str | None = None
+
+    for cell in [head.group("text"), *(c for line in row[1:] for c in _raw_cells(line))]:
+        if detect_numeric_bounds(cell):
+            bounds = cell
+        else:
+            words.append(cell)
+
+    text = collapse_whitespace(" ".join(words))
+    return f"{text} | {code} | {bounds}" if bounds else f"{text} | {code}"
 
 
 def _raw_cells(line: str) -> list[str]:

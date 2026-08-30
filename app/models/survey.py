@@ -95,6 +95,15 @@ class OptionLine(BaseModel):
 
     Programmer-facing, like routing_notes: shown for reference, never emitted.
     """
+    min_value: str | None = None
+    max_value: str | None = None
+    """A numeric range this row alone accepts, e.g. "min 0 max 200".
+
+    Unlike :attr:`row_note` these *are* emitted: they constrain what the
+    respondent may enter, so they belong in the XML rather than in a note to
+    the programmer. Both stay ``None`` on a row with no range - a "None of
+    these" row in a numeric grid is not a numeric entry at all.
+    """
 
     @classmethod
     def from_runs(cls, runs: list[TextRun], text: str | None = None) -> OptionLine:
@@ -118,6 +127,12 @@ class OptionLine(BaseModel):
         """
         cells = [cell.strip() for cell in text.split("|")]
         if len(cells) == 3 and cells[1].isdigit() and cells[2]:
+            bounds = numeric_bounds(cells[2])
+            if bounds:
+                low, high = bounds
+                return cls(
+                    raw_text=cells[0], code=cells[1], min_value=low, max_value=high
+                )
             return cls(raw_text=cells[0], code=cells[1], row_note=cells[2])
         return cls(raw_text=strip_code(text), code=code_of(text))
 
@@ -219,3 +234,9 @@ def strip_code(text: str) -> str:
     from app.classify.features import strip_trailing_code
 
     return strip_trailing_code(text)
+
+
+def numeric_bounds(text: str) -> tuple[str, str] | None:
+    from app.classify.features import detect_numeric_bounds
+
+    return detect_numeric_bounds(text)
