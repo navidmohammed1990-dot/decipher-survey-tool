@@ -697,7 +697,7 @@ turns those into the labels and attributes the template calls for. Which
 *element* the model picks is judgment and needs a real runtime, so it is
 reported rather than faked.
 
-**All 27 entries pass** and `EXPECTED_FAILURES` is empty. An entry that starts
+**All 29 entries pass** and `EXPECTED_FAILURES` is empty. An entry that starts
 passing while still listed fails the suite, so the list cannot go stale in
 either direction.
 
@@ -705,10 +705,7 @@ The harness checks each row's `min`/`max` as well as its text and code — both
 that a stated range survives parsing and reaches the XML, and that a row with
 no range does not acquire one.
 
-`A20` — a standalone bipolar scale tagged `SR` and formatted as a plain
-numbered list — is deliberately left as a **comment** in the YAML rather than a
-scored entry. It is genuinely ambiguous between `radio` and a slider, and gets
-an expectation once Phase 18 decides how `select_slider` should treat it.
+`A20` is now scored: Phase 18 built `select_slider`, and it is that.
 
 
 ---
@@ -1068,6 +1065,92 @@ Both entry points share the judgment. The DOCX path had the identical gap — a
 document using an unknown prefix with no empty paragraphs between questions
 produced *no questions at all*, the whole file becoming one preamble. Its
 blank-line fallback still covers a document where nothing recurs.
+
+---
+
+## Phase 17 — What the classifier knows, and how it is chosen
+
+Three sources reach every classification call. They had been confused for each
+other more than once, so plainly:
+
+| Source | What it is | Where it lives | Scope |
+|---|---|---|---|
+| **Seed library** | A handful of patterns the model reliably gets wrong on first sight | `app/classify/seed_library.py` | Permanent, every call, never selected |
+| **Reference dataset** | 29 real questions somebody already decided the right answer for | `reference/question_examples.yaml` | Permanent, **selected by relevance** |
+| **Correction library** | This programmer's own corrections, kept across restarts | `data/corrections.json` | Per document, **selected by relevance** |
+
+All three are **precedent, never override** — they reach the model the same way
+Phase 7's formatting hints do, as something to weigh against its own reading of
+the lines actually in front of it.
+
+### What changed
+
+The reference dataset used to be regression-only: the model never saw a line of
+it. It is now a live few-shot source, which is what a file of real questions
+paired with their right answers always was. The correction library did already
+reach live calls, but sent its three most *recent* entries whatever the
+question was.
+
+### Why selection, not accumulation
+
+Both sources grow — the dataset as real cases are added, the correction library
+every time someone corrects a question. Sending all of either would make the
+prompt bigger every month, and on a CPU-bound runtime prompt size is paid for
+in seconds on every call.
+
+So examples are **chosen**: the few most like the question in front of the
+model, capped at two from the dataset and three from corrections. The prompt is
+the same size whether the sources hold ten examples or ten thousand — there is
+a test that grows the dataset to 500 entries and asserts the prefix does not
+follow.
+
+The signal is deliberately plain: shared wording, plus a similar shape (line
+count, and how many lines carry a code). It only has to keep an unrelated grid
+example out of an open-text classification. A candidate scoring below a floor
+is dropped entirely rather than ranked last — an unrelated example is worse
+than none, because it spends tokens describing a question nobody asked.
+
+### The cost
+
+The prompt ceiling moved from 4000 to 6000 characters. A small radio question
+now sends ~4600 characters where it sent ~4000, about 15% more prompt for two
+pieces of precedent. That is a deliberate trade, and the guarantee that matters
+changed with it: not "the prompt is small" but "the prompt is **fixed**".
+
+---
+
+## Phase 18 — `select_slider`
+
+A standalone rating scale, where the response set *is* the scale:
+
+```xml
+<select label="A20" randomize="0" ss:questionClassNames="sq-sliderpoints" uses="sliderpoints.3" values="order">
+  <title>How likely are you to remember this ad?</title>
+  <comment>${res.Slider}</comment>
+  <choice label="ch1" value="1">1</choice>
+  …
+  <choice label="ch99" sliderpoints:OO="1" value="99">NA</choice>
+</select>
+```
+
+Its points are `<choice>` elements, not `<row>`s, and it has no rows at all.
+The neighbours it must not become: a list of distinct named options is still
+`radio`, and one scale asked about several statements is still a grid. The
+prompt describes the concept through several phrasings — "How appealing do you
+find this?", "How much do you agree or disagree?", "How likely are you to
+remember this ad?" — so the model recognises the idea rather than a wording.
+
+A point that opts out of the scale is **marked, not numbered along it**: it
+takes `sliderpoints:OO="1"`, and where the Phase 20 table has no house code for
+it (`NA`) it takes 99 rather than the next number on the scale. `Don't know`
+still takes 97 from that table, and a source code still outranks both.
+
+`${res.Slider}` is new in the resource catalog, mapped from `select_slider`.
+
+A20 — the bipolar-scale case that sat as an unscored comment in the dataset
+waiting for this — is now a scored entry, alongside a deliberately
+differently-worded 5-point appeal scale with a `Not applicable` point, so the
+pair tests the concept rather than one phrasing.
 
 ---
 

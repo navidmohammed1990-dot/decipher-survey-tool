@@ -322,18 +322,20 @@ def test_only_real_changes_are_remembered():
 
 
 def test_only_the_most_recent_corrections_are_kept():
-    from app.classify.corrections import MAX_CORRECTIONS
+    """Phase 17 widened the pool that is held; what is *sent* is still three."""
+    from app.classify.corrections import CORRECTION_POOL, MAX_CORRECTIONS
 
     correction_memory.use_document("doc.docx")
-    for number in range(6):
+    for number in range(CORRECTION_POOL + 6):
         correction_memory.record(Correction(
             label=f"Q{number}", original_lines=["x"],
             ai_said={"element": "radio"}, sp_corrected_to={"element": "checkbox"},
         ))
 
     kept = correction_memory.recent()
-    assert len(kept) == MAX_CORRECTIONS
-    assert [c.label for c in kept] == ["Q3", "Q4", "Q5"]
+    assert len(kept) == CORRECTION_POOL
+    assert kept[-1].label == f"Q{CORRECTION_POOL + 5}"
+    assert correction_memory.prompt_prefix().count("Example") <= MAX_CORRECTIONS
 
 
 def test_re_editing_a_question_supersedes_its_earlier_correction():

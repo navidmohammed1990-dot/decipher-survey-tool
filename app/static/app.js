@@ -3,13 +3,13 @@
 
 const SUPPORTED_ELEMENTS = [
   "radio", "checkbox", "radio_grid", "checkbox_grid",
-  "textarea", "text", "number", "select", "html",
+  "textarea", "text", "number", "select", "select_slider", "html",
   // Programmer content: generates nothing. Must be listed, or a card
   // classified this way would silently fall back to the first option.
   "not_a_question",
 ];
 const GRID_ELEMENTS = new Set(["radio_grid", "checkbox_grid"]);
-const OPTION_ELEMENTS = new Set(["radio", "checkbox", "select"]);
+const OPTION_ELEMENTS = new Set(["radio", "checkbox", "select", "select_slider"]);
 const NON_QUESTION_ELEMENTS = new Set(["not_a_question"]);
 
 const $ = (id) => document.getElementById(id);

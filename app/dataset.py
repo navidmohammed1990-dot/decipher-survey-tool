@@ -62,8 +62,21 @@ def parsed_lines(example: Example) -> list:
 
 
 def parsed_options(example: Example) -> dict[str, OptionLine]:
-    """Each parsed answer line, keyed by the text it recovered."""
-    options = [OptionLine.from_text(line.text) for line in parsed_lines(example)]
+    """Each parsed answer line, keyed by the text it recovered.
+
+    A code typed as a leading marker - the "1." in "1. Very likely" - is read
+    the same way the live classifier reads it, rather than being missed. The
+    harness measuring less than the pipeline does is how a slider entry looked
+    broken when it was not.
+    """
+    from app.classify.lines import marker_code
+
+    options = []
+    for line in parsed_lines(example):
+        option = OptionLine.from_text(line.text)
+        if option.code is None and line.literal_marker:
+            option.code = marker_code(line.literal_marker)
+        options.append(option)
     return {option.raw_text: option for option in options}
 
 
@@ -160,7 +173,7 @@ def check_generation(example: Example) -> list[str]:
     if verify and f'verify="{verify}"' not in xml:
         failures.append(f"verify {verify!r} missing")
 
-    for entry in example.expected_lines("rows"):
+    for entry in example.answer_entries:
         label = entry.get("label")
         if label and f'label="{label}"' not in xml:
             failures.append(f"row label {label!r} missing")
@@ -169,10 +182,21 @@ def check_generation(example: Example) -> list[str]:
         if entry.get("exclusive") and 'exclusive="1"' not in xml:
             failures.append(f"exclusive attribute missing on {label}")
 
-        # An opt-out row is a different tag, not a row with fewer attributes.
-        wanted_tag = "noanswer" if entry.get("noanswer") else "row"
+        # An opt-out row is a different tag, not a row with fewer attributes;
+        # a slider's answer list is <choice> rather than <row> throughout.
+        if entry.get("noanswer"):
+            wanted_tag = "noanswer"
+        elif example.element == "select_slider":
+            wanted_tag = "choice"
+        else:
+            wanted_tag = "row"
         if label and f'<{wanted_tag} label="{label}"' not in xml:
             failures.append(f"{label} should be a <{wanted_tag}>")
+
+        if entry.get("slider_opt_out") and label:
+            line = next((l for l in xml.splitlines() if f'label="{label}"' in l), "")
+            if 'sliderpoints:OO="1"' not in line:
+                failures.append(f"{label} should carry sliderpoints:OO")
 
         # A stated range belongs on the question, never repeated per row.
         if (entry.get("min") or entry.get("max")) and label:

@@ -15,6 +15,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from app.classify.corrections import correction_memory
+from app.classify.reference import prompt_prefix as reference_prefix
 from app.classify.seed_library import prompt_prefix as seed_prefix
 from app.classify.lines import SourceLine, marker_code, question_lines
 from app.classify.ollama import OllamaClient, OllamaError
@@ -84,7 +85,15 @@ usually introduces the NEXT question - classify it as routing and do not use
 it as this question's type signal.
 
 Then decide the element type: radio, checkbox, radio_grid, checkbox_grid,
-textarea, text, number, select, html, not_a_question, custom_complex.
+textarea, text, number, select, select_slider, html, not_a_question,
+custom_complex.
+
+Choose select_slider for ONE rating scale asked once, where the response set
+IS the scale - "How appealing do you find this?", "How much do you agree or
+disagree?", "How likely are you to remember this ad?", each answered on
+numbered points from one end to the other. Distinct neighbours: a list of
+named options is radio, and the same scale asked about SEVERAL things is a
+grid. An opt-out point ("NA", "Don't know") is one of its options.
 
 Choose custom_complex for a real respondent task no standard element can
 express - a gamified image quiz, a slider synced to video playback, anything
@@ -503,8 +512,17 @@ def classify_question(
     try:
         # Seeded examples are always carried; document corrections are not,
         # since they belong to the document currently under review.
-        prefix = correction_memory.prompt_prefix() if system_prefix is None else system_prefix
-        system = seed_prefix() + prefix + SYSTEM_PROMPT
+        # Three sources, in widening order of specificity: patterns worth
+        # recognising on sight, precedent from the reference dataset, and this
+        # programmer's own corrections. All three are evidence the model weighs
+        # against the lines actually in front of it - none of them decides.
+        texts = [line.text for line in lines]
+        prefix = (
+            correction_memory.prompt_prefix(texts)
+            if system_prefix is None
+            else system_prefix
+        )
+        system = seed_prefix() + reference_prefix(texts) + prefix + SYSTEM_PROMPT
         payload = client.generate_json(system, build_prompt(label, lines))
         return interpret_response(payload, label, lines, threshold)
     except (OllamaError, ValueError) as exc:

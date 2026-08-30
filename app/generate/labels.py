@@ -185,6 +185,51 @@ def _explicit_code(option: OptionLine) -> int | None:
         return None
 
 
+#: Marks a slider point that opts out of the scale rather than sitting on it.
+SLIDER_OPT_OUT_ATTRS = {"sliderpoints:OO": "1"}
+
+
+def label_choices(options: list[OptionLine]) -> list[LabelledLine]:
+    """Label a slider's scale points ``ch1``, ``ch2`` … in source order.
+
+    The same numbering precedence as rows - a source code first, then the
+    house default, then sequential - with one addition: an opt-out point that
+    the house table has no code for takes 99, matching the template's
+    ``ch99`` for "NA". It is off the scale, so it cannot take the next number
+    on it.
+    """
+    labelled: list[LabelledLine] = []
+    counter = 0
+    claimed = {code for code in (_explicit_code(option) for option in options) if code}
+    taken = set(claimed)
+
+    for option in options:
+        text = option.raw_text
+        opt_out = is_opt_out(text)
+        attrs = dict(SLIDER_OPT_OUT_ATTRS) if opt_out else {}
+
+        explicit = _explicit_code(option)
+        house = default_code(text)
+        if explicit is not None:
+            suffix = explicit
+        elif house is not None and house not in taken:
+            suffix = house
+        elif opt_out and NONE_LABEL_SUFFIX not in taken:
+            suffix = NONE_LABEL_SUFFIX
+        else:
+            counter += 1
+            while counter in taken:
+                counter += 1
+            suffix = counter
+
+        taken.add(suffix)
+        labelled.append(
+            LabelledLine(option=option, label=f"ch{suffix}", suffix=suffix, attrs=attrs)
+        )
+
+    return labelled
+
+
 def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]:
     """Assign row labels, preferring codes the source document supplied.
 

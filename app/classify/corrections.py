@@ -18,7 +18,15 @@ from pydantic import BaseModel, Field
 
 #: How many recent corrections to carry. Enough to convey a convention without
 #: crowding out the question actually being classified.
+#: How many corrections may accompany one call. Bounded on purpose: the
+#: library grows every time a question is corrected, and prompt size is paid
+#: for in seconds on a CPU-bound runtime.
 MAX_CORRECTIONS = 3
+
+#: How many are *held* to choose from. Larger than what is sent, so the choice
+#: is a choice - the three most like the current question, not the three most
+#: recent regardless of subject.
+CORRECTION_POOL = 20
 
 
 class Correction(BaseModel):
@@ -88,18 +96,35 @@ class CorrectionMemory:
             # One entry per question: a second edit supersedes the first.
             self._corrections = [c for c in self._corrections if c.label != correction.label]
             self._corrections.append(correction)
-            del self._corrections[:-MAX_CORRECTIONS]
+            del self._corrections[:-CORRECTION_POOL]
         return True
 
     def recent(self) -> list[Correction]:
         with self._lock:
             return list(self._corrections)
 
-    def prompt_prefix(self) -> str:
-        """Few-shot examples to prepend to the system prompt, oldest first."""
+    def prompt_prefix(self, lines: list[str] | None = None) -> str:
+        """Few-shot examples to prepend to the system prompt.
+
+        Given the lines about to be classified, the corrections most like them
+        are chosen. Without them - a caller that has no current question - the
+        most recent are used, which is what this did before relevance existed.
+        """
         corrections = self.recent()
         if not corrections:
             return ""
+
+        if lines:
+            from app.classify.relevance import most_relevant
+
+            corrections = most_relevant(
+                lines,
+                [(c.original_lines, c) for c in corrections],
+                limit=MAX_CORRECTIONS,
+            ) or corrections[-MAX_CORRECTIONS:]
+        else:
+            corrections = corrections[-MAX_CORRECTIONS:]
+
         return "\n\n".join(c.as_prompt_example() for c in corrections) + "\n\n"
 
     def use_document(self, name: str | None) -> None:
@@ -115,7 +140,7 @@ class CorrectionMemory:
             self._corrections = []
             store = self._store()
             if store is not None and name:
-                self._corrections = store.for_document(name)[-MAX_CORRECTIONS:]
+                self._corrections = store.for_document(name)[-CORRECTION_POOL:]
 
     def clear(self) -> None:
         with self._lock:

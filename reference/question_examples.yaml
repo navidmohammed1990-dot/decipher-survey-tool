@@ -158,18 +158,48 @@
       - {label: r991, text: "None, I have not taken any international flights from [MARKET] in the last 12 months", code: "991", noanswer: true}
     note: "min/max are what the SOURCE states beside each row, and are asserted against the parser. The OUTPUT carries the range once on the question as verify=range(0,200) — confirmed against real generated Decipher XML — never as per-row min/max attributes. Row 991 is not a numeric entry at all and generates as <noanswer>, a distinct tag from the r99/exclusive convention used by radio and checkbox."
 
-# PENDING — not added as a scored entry yet, decision needed
-# id: scale_question_ambiguous_radio_or_slider
-# category: UNRESOLVED (radio or select_slider?)
-# source: FF5_x_AP_Ad_Effectiveness_Master_Questionnaire_20260827_PP.docx, A20
-#   A20 How likely are you to remember this ad?
-#   SR, SHOW BRANDED STILLS ABOVE QUESTION
-#   1. Very likely / 2. Likely / 3. Neither likely nor unlikely /
-#   4. Unlikely / 5. Very unlikely
-# This is a real, genuinely ambiguous case — a standalone bipolar scale,
-# tagged SR, formatted as a plain numbered list. Do not add an "expected"
-# outcome here until Phase 18's select_slider classification rule is
-# built and we've decided how it should treat this specific shape.
+- id: select_slider_bipolar_scale
+  category: select_slider
+  description: A standalone bipolar scale, tagged SR, formatted as a plain numbered list — the A20 case that waited for Phase 18
+  input: |
+    A20 How likely are you to remember this ad?
+    SR, SHOW BRANDED STILLS ABOVE QUESTION
+    1. Very likely
+    2. Likely
+    3. Neither likely nor unlikely
+    4. Unlikely
+    5. Very unlikely
+  expected:
+    element: select_slider
+    comment_tag: "${res.Slider}"
+    options:
+      - {label: ch1, text: "Very likely", code: "1"}
+      - {label: ch2, text: "Likely", code: "2"}
+      - {label: ch3, text: "Neither likely nor unlikely", code: "3"}
+      - {label: ch4, text: "Unlikely", code: "4"}
+      - {label: ch5, text: "Very unlikely", code: "5"}
+    note: "One scale asked once, so the response set IS the scale — not a list of named options (radio) and not one scale across several statements (radio_grid). Was previously an unscored comment pending Phase 18."
+
+- id: select_slider_with_opt_out
+  category: select_slider
+  description: A 5-point appeal scale with a "Not applicable" point that sits off the scale rather than on it
+  input: |
+    APP7. How appealing do you find this product?
+    SR
+    1   Not at all appealing
+    2   Slightly appealing
+    3   Moderately appealing
+    4   Very appealing
+    5   Extremely appealing
+    99  Not applicable
+  expected:
+    element: select_slider
+    comment_tag: "${res.Slider}"
+    options:
+      - {label: ch1, text: "Not at all appealing", code: "1"}
+      - {label: ch5, text: "Extremely appealing", code: "5"}
+      - {label: ch99, text: "Not applicable", code: "99", slider_opt_out: true}
+    note: "The opt-out point generates sliderpoints:OO=\"1\", not a regular sequential choice. Deliberately worded unlike the A20 entry so the pair tests the concept rather than one phrasing."
 
 # ---------------------------------------------------------------------------
 # CORE ELEMENT TYPES — one canonical example each, matched exactly to your

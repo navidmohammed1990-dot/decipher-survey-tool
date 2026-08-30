@@ -40,7 +40,8 @@ def test_catalog_comes_from_the_template_file():
 
     assert catalog["SR"] == "Please select one response."
     assert catalog["MRStatement"] == "Please select all that apply for each statement."
-    assert len(catalog) == 12
+    assert "Slider" in catalog, "Phase 18 added the slider tag"
+    assert len(catalog) == 13
 
 
 def test_editing_the_template_changes_the_catalog(tmp_path):

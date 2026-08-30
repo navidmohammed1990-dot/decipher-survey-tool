@@ -45,6 +45,7 @@ _FLAT_TAGS = {
     "textarea": "Open",
     "text": "Open",
     "select": "Ranking",
+    "select_slider": "Slider",
     # html takes no comment at all.
     "html": None,
     # None of these are rendered, so none carries a comment.

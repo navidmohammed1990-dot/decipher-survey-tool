@@ -143,11 +143,17 @@ def test_regenerating_costs_no_model_call(client, stub):
 
 
 def test_the_prompt_stays_small(client, stub):
-    """Phase 7's instructions plus a few lines, not an accumulating history."""
+    """Phase 7's instructions, a few lines, and a little precedent.
+
+    The ceiling moved from 4000 to 6000 in Phase 17, deliberately: the prompt
+    now carries the two most relevant known examples. What matters is that it
+    is *fixed* - see the boundedness tests below - not that it is as small as
+    it was before there was anything to carry.
+    """
     client.post("/api/quick-convert", json={"text": "Q1. Pick one\nYes\nNo"})
 
     total = len(stub.systems[0]) + len(stub.prompts[0])
-    assert total < 4000, f"prompt grew to {total} chars (~{total // 4} tokens)"
+    assert total < 6000, f"prompt grew to {total} chars (~{total // 4} tokens)"
 
 
 def test_the_prompt_does_not_grow_across_conversions(client, stub):
@@ -184,8 +190,11 @@ def test_quick_convert_carries_no_correction_history(client, stub):
     assert "The survey programmer corrected an earlier question" not in system, (
         "document corrections must not reach the paste path"
     )
-    # Seeded examples are permanent and do travel with every call.
-    assert system == seed_prefix() + SYSTEM_PROMPT
+    # Seeded examples and dataset precedent are permanent and do travel with
+    # every call; the document's own corrections are what must not.
+    assert system.startswith(seed_prefix())
+    assert system.endswith(SYSTEM_PROMPT)
+    assert "x" * 400 not in system
 
 
 # -- one tags round trip ---------------------------------------------------

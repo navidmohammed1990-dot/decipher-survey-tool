@@ -12,7 +12,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from app.generate.labels import LabelledLine, is_opt_out, label_cols, label_rows
+from app.generate.labels import (
+    LabelledLine,
+    is_opt_out,
+    label_choices,
+    label_cols,
+    label_rows,
+)
 from app.generate.resources import (
     LITERAL_COMMENT_DEFAULTS,
     reference,
@@ -41,6 +47,8 @@ class ElementSpec:
     has_cols: bool = False
     row_values: bool = False
     """True when rows carry ``value="N"`` matching the label suffix."""
+    has_choices: bool = False
+    """True when the answer list renders as ``<choice>`` rather than ``<row>``."""
 
 
 #: Verbatim from `Standard_Template_Questions_V1_24Aug26.xml`.
@@ -110,6 +118,19 @@ ELEMENT_SPECS: dict[str, ElementSpec] = {
         has_rows=True,
         has_cols=True,
     ),
+    #: A standalone rating scale. The response set *is* the scale, so its
+    #: points are <choice> elements rather than <row>s - matched to the real
+    #: template, which is also where the attribute order comes from.
+    "select_slider": ElementSpec(
+        tag="select",
+        attrs={
+            "randomize": "0",
+            "ss:questionClassNames": "sq-sliderpoints",
+            "uses": "sliderpoints.3",
+            "values": "order",
+        },
+        has_choices=True,
+    ),
     "html": ElementSpec(tag="html", attrs={"where": "survey"}),
 }
 
@@ -128,11 +149,17 @@ def _open_tag(tag: str, label: str, attrs: dict[str, str]) -> str:
     return f'<{tag} label="{_attr_value(label)}"{rendered}>'
 
 
-def _line_element(tag: str, line: LabelledLine, *, with_value: bool) -> str:
+def _line_element(
+    tag: str, line: LabelledLine, *, with_value: bool, value_last: bool = False
+) -> str:
     attrs = {"label": line.label}
-    if with_value:
+    if with_value and not value_last:
         attrs["value"] = str(line.suffix)
     attrs.update(line.attrs)
+    if with_value and value_last:
+        # A slider's choice carries value after its own attributes, matching
+        # the real template's ordering.
+        attrs["value"] = str(line.suffix)
 
     rendered = "".join(f' {name}="{_attr_value(value)}"' for name, value in attrs.items())
     body = option_markup(line.option.raw_text, line.option.bold, line.option.italic)
@@ -241,6 +268,7 @@ def generate_question(question: Question) -> str:
     if question.element == "html":
         return f"{_open_tag(spec.tag, question.label, spec.attrs)}{title}</{spec.tag}>"
 
+    choices = label_choices(question.options) if spec.has_choices else []
     rows = _rows_for(question, spec) if spec.has_rows else []
     attrs = dict(spec.attrs)
     numeric_grid = question.element == "number" and bool(rows)
@@ -266,6 +294,11 @@ def generate_question(question: Question) -> str:
             # on radio and checkbox, which this tag replaces rather than joins.
             row = replace(row, attrs={})
         lines.append(_line_element(tag, row, with_value=spec.row_values))
+
+    for choice in choices:
+        lines.append(
+            _line_element("choice", choice, with_value=True, value_last=True)
+        )
 
     if spec.has_cols:
         for col in label_cols(question.cols):

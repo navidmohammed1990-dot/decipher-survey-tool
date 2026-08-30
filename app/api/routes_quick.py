@@ -115,7 +115,9 @@ def quick_convert(
             review_threshold,
             # The document flow's corrections belong to that document, not to
             # an unrelated paste. Quick Convert carries only its own.
-            system_prefix=quick_corrections.prompt_prefix(),
+            system_prefix=quick_corrections.prompt_prefix(
+                [line.text for line in block.lines]
+            ),
         )
         questions.append(outcome.question)
         fallback_count += 1 if outcome.used_fallback else 0

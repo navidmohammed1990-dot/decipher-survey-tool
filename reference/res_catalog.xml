@@ -24,5 +24,6 @@
   <res label="MRProduct">Please select all that apply for each product.</res>
   <res label="SRStatement">Please select one response for each statement.</res>
   <res label="MRStatement">Please select all that apply for each statement.</res>
+  <res label="Slider">Please use the slider to give your answer.</res>
   <res label="Ranking">Please drag and drop the options OR Please click each item / options to rank.</res>
 </resources>

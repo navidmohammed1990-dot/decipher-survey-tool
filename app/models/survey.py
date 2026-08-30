@@ -39,6 +39,7 @@ SUPPORTED_ELEMENTS: tuple[str, ...] = (
     "text",
     "number",
     "select",
+    "select_slider",
     "html",
     "not_a_question",
     "custom_complex",
@@ -63,7 +64,11 @@ EXCLUDED_ELEMENTS = frozenset({"excluded"})
 NO_XML_ELEMENTS = NON_QUESTION_ELEMENTS | CUSTOM_ELEMENTS | EXCLUDED_ELEMENTS
 
 #: Elements whose answer list lives in ``options``.
-OPTION_ELEMENTS = frozenset({"radio", "checkbox", "select"})
+OPTION_ELEMENTS = frozenset({"radio", "checkbox", "select", "select_slider"})
+
+#: Elements whose answer list is rendered as ``<choice>`` rather than
+#: ``<row>``: the scale points of a slider are the response set itself.
+CHOICE_ELEMENTS = frozenset({"select_slider"})
 
 #: Elements that carry both ``rows`` and ``cols``.
 GRID_ELEMENTS = frozenset({"radio_grid", "checkbox_grid"})
