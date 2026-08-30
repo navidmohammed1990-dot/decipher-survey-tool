@@ -232,7 +232,9 @@ def test_checkbox_rows_omit_value():
          "${res.Open}", "CheckBlank(2,Q1)"),
         ("text", [("optional", "0"), ("randomize", "0"), ("size", "25")],
          "${res.Open}", "CheckBlank(2,Q1)"),
-        ("number", [("size", "3"), ("optional", "0")], "${res.Open}", None),
+        # A number with rows is a numeric grid, so it also declares listDisplay.
+        ("number", [("size", "3"), ("optional", "0"), ("ss:listDisplay", "0")],
+         "${res.Open}", None),
         ("select", [("optional", "0")], "${res.Ranking}", None),
     ],
 )

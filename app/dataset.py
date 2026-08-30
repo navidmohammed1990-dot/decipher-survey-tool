@@ -156,6 +156,10 @@ def check_generation(example: Example) -> list[str]:
     if example.expected.get("atleast") and 'atleast="1"' not in xml:
         failures.append('atleast="1" missing')
 
+    verify = example.expected.get("verify")
+    if verify and f'verify="{verify}"' not in xml:
+        failures.append(f"verify {verify!r} missing")
+
     for entry in example.expected_lines("rows"):
         label = entry.get("label")
         if label and f'label="{label}"' not in xml:
@@ -164,10 +168,17 @@ def check_generation(example: Example) -> list[str]:
             failures.append(f"open attribute missing on {label}")
         if entry.get("exclusive") and 'exclusive="1"' not in xml:
             failures.append(f"exclusive attribute missing on {label}")
-        for field in ("min", "max"):
-            value = entry.get(field)
-            if value is not None and f'{field}="{value}"' not in xml:
-                failures.append(f"{field} attribute missing on {label}")
+
+        # An opt-out row is a different tag, not a row with fewer attributes.
+        wanted_tag = "noanswer" if entry.get("noanswer") else "row"
+        if label and f'<{wanted_tag} label="{label}"' not in xml:
+            failures.append(f"{label} should be a <{wanted_tag}>")
+
+        # A stated range belongs on the question, never repeated per row.
+        if (entry.get("min") or entry.get("max")) and label:
+            line = next((l for l in xml.splitlines() if f'label="{label}"' in l), "")
+            if 'min="' in line or 'max="' in line:
+                failures.append(f"{label} carries per-row min/max; expected none")
 
     return failures
 

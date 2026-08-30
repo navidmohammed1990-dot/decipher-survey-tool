@@ -162,19 +162,85 @@ def numeric_question() -> Question:
     )
 
 
-def test_each_row_carries_its_own_range():
+def test_the_range_is_carried_once_on_the_question():
+    """Confirmed against real generated XML: verify=range(), not per-row."""
     xml = generate_question(numeric_question())
 
-    assert '<row label="r1" min="0" max="200">For Leisure</row>' in xml
-    assert '<row label="r2" min="0" max="200">For Business</row>' in xml
+    assert 'verify="range(0,200)"' in xml
+    assert '<row label="r1">For Leisure</row>' in xml
+    assert '<row label="r2">For Business</row>' in xml
 
 
-def test_a_row_without_a_range_gets_no_min_or_max_attributes():
+def test_no_row_carries_min_or_max_attributes():
     xml = generate_question(numeric_question())
-    none_row = next(line for line in xml.splitlines() if "None of these" in line)
 
-    assert "min=" not in none_row
-    assert "max=" not in none_row
+    assert 'min="' not in xml
+    assert 'max="' not in xml
+
+
+def test_a_numeric_grid_declares_its_list_display():
+    assert 'ss:listDisplay="0"' in generate_question(numeric_question())
+
+
+def test_amount_is_never_emitted():
+    """Confirmed unnecessary: the programmer adds it by hand where needed."""
+    assert "amount=" not in generate_question(numeric_question())
+
+
+def test_an_opt_out_row_is_a_noanswer_not_a_row():
+    xml = generate_question(numeric_question())
+
+    assert '<noanswer label="r991">None of these</noanswer>' in xml
+    assert "<row" in xml, "the numeric rows are still rows"
+
+
+def test_a_rangeless_row_is_the_opt_out_whatever_it_says():
+    """Structure decides where it can - no phrase needs recognising."""
+    question = numeric_question()
+    question.options[2] = OptionLine(raw_text="Something else entirely", code="97")
+    xml = generate_question(question)
+
+    assert '<noanswer label="r97">Something else entirely</noanswer>' in xml
+
+
+def test_wording_decides_only_when_no_row_states_a_range():
+    question = Question(
+        label="A9b",
+        element="number",
+        title=[TextRun(text="What proportion...?")],
+        options=[
+            OptionLine(raw_text="Held by the 3PL provider", code="1"),
+            OptionLine(raw_text="Held by my business", code="2"),
+            OptionLine(raw_text="Don't know", code="98"),
+        ],
+        needs_review=False,
+    )
+    xml = generate_question(question)
+
+    assert '<row label="r1">Held by the 3PL provider</row>' in xml
+    assert '<noanswer label="r98">Don\'t know</noanswer>' in xml
+    assert "verify=" not in xml, "no row stated a range, so none is invented"
+    assert "amount=" not in xml
+
+
+def test_radio_exclusion_rows_are_unaffected():
+    """The r99/exclusive convention is separate and already confirmed."""
+    for element in ("radio", "checkbox"):
+        xml = generate_question(
+            Question(
+                label="Q1",
+                element=element,
+                title=[TextRun(text="Pick one")],
+                options=[
+                    OptionLine(raw_text="Option 1"),
+                    OptionLine(raw_text="None of the above"),
+                ],
+                needs_review=False,
+            )
+        )
+        assert "<noanswer" not in xml, f"{element} must not use noanswer"
+        assert '<row label="r99"' in xml
+        assert 'randomize="0"' in xml
 
 
 def test_a_single_value_number_question_still_has_no_rows():
@@ -198,5 +264,7 @@ def test_the_dataset_entry_generates_the_expected_shape():
     )
     xml = generate_question(build_question(example))
 
-    assert xml.count("<row") == 3
-    assert xml.count('min="0" max="200"') == 2
+    assert xml.count("<row ") == 2
+    assert xml.count("<noanswer ") == 1
+    assert 'verify="range(0,200)"' in xml
+    assert 'min="' not in xml and 'max="' not in xml

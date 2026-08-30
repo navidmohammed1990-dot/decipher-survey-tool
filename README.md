@@ -906,31 +906,47 @@ cannot be read as prose — underscored, zero-padded, or set off by a real colum
 gap. Without that last test `18 to 24 years` and `1 year` both look like a code
 plus text.
 
-### The range
+### The range, and rows that are not answers
 
-`OptionLine` gains `min_value` / `max_value`. Unlike `row_note`, these **are**
-emitted: they constrain what the respondent may enter, so they belong in the
-XML rather than in a note to the programmer. A cell stating a range is lifted
-out of the row's wording the same way a directive in an option's own cell is.
+`OptionLine` carries `min_value` / `max_value` because that is how the *source*
+writes a range — beside each row. The *output* does not: Decipher carries it
+once on the question as `verify="range(lo,hi)"`. An earlier draft assumed
+per-row `min`/`max` attributes and flagged the assumption; real generated XML
+settled it, and the per-row attributes are gone.
+
 Only a complete pair counts — a lone `max 200` leaves the range open at one
-end, which is not a reason to invent a zero.
+end, which is not a reason to invent a zero. Rows are expected to agree and
+every real example so far does; where they disagree the widest span is used,
+since a range that rejects an answer a row explicitly allows is the worse
+failure of the two.
+
+A row that offers a way out instead of a figure is a **different tag**, not a
+row with fewer attributes:
 
 ```xml
-<number label="Q20" size="3" optional="0">
+<number label="A9b" size="3" optional="0" ss:listDisplay="0" verify="range(0,200)">
   <title>How many international flights…</title>
   <comment>${res.Open}</comment>
-  <row label="r1" min="0" max="200">For Leisure…</row>
-  <row label="r2" min="0" max="200">For Business…</row>
-  <row label="r991">None, I have not taken any international flights…</row>
+  <row label="r1">For Leisure…</row>
+  <row label="r2">For Business…</row>
+  <noanswer label="r991">None, I have not taken any international flights…</noanswer>
 </number>
 ```
 
-**Unconfirmed against house convention.** `<row min max>` under `<number>` is
-the brief's proposed shape, carried through as specified. The canonical
-template (`Standard_Template_Questions_V1_24Aug26.xml`) is not in this
-repository, so nothing here verifies it — including whether `size="3"` is still
-right on a `<number>` that has rows. Worth confirming against a real generated
-survey before relying on it.
+Structure decides which row that is wherever it can: in a question whose rows
+state ranges, a row that states none is not a numeric entry, whatever it says.
+Only when *no* row states a range does the wording get a say — a small opt-out
+vocabulary, which is exactly the kind of thing that only covers the house
+styles it was written against, and so is the second opinion rather than the
+test.
+
+This is scoped to numeric questions. The `r99` / `exclusive` convention on
+radio and checkbox is separate, already confirmed, and untouched — a test pins
+that both still emit `<row label="r99" … randomize="0">` and never a
+`<noanswer>`.
+
+`amount` is never emitted. It was never built, and per the correction it should
+not be: the programmer adds it by hand where a survey needs it.
 
 A `number` question with no rows emits exactly what it did before.
 

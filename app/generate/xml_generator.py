@@ -10,9 +10,9 @@ template. They are data, not suggestions — do not "improve" them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from app.generate.labels import LabelledLine, label_cols, label_rows
+from app.generate.labels import LabelledLine, is_opt_out, label_cols, label_rows
 from app.generate.resources import (
     LITERAL_COMMENT_DEFAULTS,
     reference,
@@ -139,6 +139,50 @@ def _line_element(tag: str, line: LabelledLine, *, with_value: bool) -> str:
     return f"{INDENT}<{tag}{rendered}>{body}</{tag}>"
 
 
+#: Added to a numeric question that has rows, matching a real generated survey.
+NUMERIC_GRID_ATTRS = {"ss:listDisplay": "0"}
+
+
+def numeric_range(rows: list[LabelledLine]) -> tuple[str, str] | None:
+    """The range a numeric question accepts, from what its rows state.
+
+    Decipher carries this once on the question as ``verify="range(lo,hi)"``,
+    not per row - confirmed against a real generated survey, which is why the
+    per-row ``min``/``max`` attributes an earlier draft assumed are gone. The
+    source still writes the range beside each row, so it is read per row and
+    reduced here.
+
+    Rows are expected to agree; every real example so far has. Where they do
+    not, the widest span is used, because a range that rejects an answer a row
+    explicitly allows is the worse failure of the two.
+    """
+    stated = [
+        (int(row.option.min_value), int(row.option.max_value))
+        for row in rows
+        if row.option.min_value is not None and row.option.max_value is not None
+    ]
+    if not stated:
+        return None
+    return str(min(low for low, _ in stated)), str(max(high for _, high in stated))
+
+
+def _numeric_row_tag(row: LabelledLine, rows: list[LabelledLine]) -> str:
+    """``noanswer`` for a row that offers a way out instead of a figure.
+
+    Structure decides it where it can: in a question whose rows state ranges,
+    a row that states none is not a numeric entry. Only when no row states one
+    does the wording get a say - and this is scoped to numeric questions, so
+    the r99/exclusive convention on radio and checkbox is untouched.
+    """
+    has_range = row.option.min_value is not None and row.option.max_value is not None
+    if any(
+        other.option.min_value is not None and other.option.max_value is not None
+        for other in rows
+    ):
+        return "row" if has_range else "noanswer"
+    return "noanswer" if is_opt_out(row.option.raw_text) else "row"
+
+
 def _rows_for(question: Question, spec: ElementSpec) -> list[LabelledLine]:
     """Grids read from ``rows``; flat elements read from ``options``."""
     source = question.rows if spec.has_cols else question.options
@@ -197,16 +241,31 @@ def generate_question(question: Question) -> str:
     if question.element == "html":
         return f"{_open_tag(spec.tag, question.label, spec.attrs)}{title}</{spec.tag}>"
 
-    lines = [_open_tag(spec.tag, question.label, spec.attrs)]
+    rows = _rows_for(question, spec) if spec.has_rows else []
+    attrs = dict(spec.attrs)
+    numeric_grid = question.element == "number" and bool(rows)
+
+    if numeric_grid:
+        attrs.update(NUMERIC_GRID_ATTRS)
+        span = numeric_range(rows)
+        if span:
+            attrs["verify"] = f"range({span[0]},{span[1]})"
+
+    lines = [_open_tag(spec.tag, question.label, attrs)]
     lines.append(f"{INDENT}<title>{title}</title>")
 
     comment = comment_body(question)
     if comment:
         lines.append(f"{INDENT}<comment>{comment}</comment>")
 
-    if spec.has_rows:
-        for row in _rows_for(question, spec):
-            lines.append(_line_element("row", row, with_value=spec.row_values))
+    for row in rows:
+        tag = _numeric_row_tag(row, rows) if numeric_grid else "row"
+        if tag == "noanswer":
+            # Bare but for its label, as the real generated survey has it. The
+            # randomize/exclusive attributes belong to the r99 row convention
+            # on radio and checkbox, which this tag replaces rather than joins.
+            row = replace(row, attrs={})
+        lines.append(_line_element(tag, row, with_value=spec.row_values))
 
     if spec.has_cols:
         for col in label_cols(question.cols):

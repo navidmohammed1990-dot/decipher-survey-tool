@@ -151,11 +151,12 @@
         [MARKET] in the last 12 months
   expected:
     element: number
+    verify: "range(0,200)"
     rows:
-      - {text: "For Leisure (i.e. holidays or short break, visiting family and friends)", code: "1", min: "0", max: "200"}
-      - {text: "For Business (i.e. conferences, client presentations, business development, client meetings)", code: "2", min: "0", max: "200"}
-      - {text: "None, I have not taken any international flights from [MARKET] in the last 12 months", code: "991"}
-    note: "Row 991 is a non-numeric exclusive option, not a numeric entry itself — should be handled the same way none-of-the-above is handled elsewhere, not treated as a value to be entered."
+      - {label: r1, text: "For Leisure (i.e. holidays or short break, visiting family and friends)", code: "1", min: "0", max: "200"}
+      - {label: r2, text: "For Business (i.e. conferences, client presentations, business development, client meetings)", code: "2", min: "0", max: "200"}
+      - {label: r991, text: "None, I have not taken any international flights from [MARKET] in the last 12 months", code: "991", noanswer: true}
+    note: "min/max are what the SOURCE states beside each row, and are asserted against the parser. The OUTPUT carries the range once on the question as verify=range(0,200) — confirmed against real generated Decipher XML — never as per-row min/max attributes. Row 991 is not a numeric entry at all and generates as <noanswer>, a distinct tag from the r99/exclusive convention used by radio and checkbox."
 
 # PENDING — not added as a scored entry yet, decision needed
 # id: scale_question_ambiguous_radio_or_slider

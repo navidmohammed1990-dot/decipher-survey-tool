@@ -35,6 +35,28 @@ def is_none_of_the_above(text: str) -> bool:
     return bool(_NONE_OF.search(text))
 
 
+#: An opt-out a numeric question offers instead of a figure: "Don't know",
+#: "None, I have not taken any...", "Prefer not to say". Anchored at the start
+#: because an opt-out row says so first - "I don't know the exact figure" is
+#: prose, not an opt-out.
+#:
+#: A vocabulary, and therefore the kind of thing that only ever covers the
+#: house styles it was written against. It is a second opinion here, not the
+#: test: a row that states no range where its siblings do is already an
+#: opt-out on structure alone. This only catches the case where no row states
+#: one.
+_OPT_OUT = re.compile(
+    r"^(?:none\b|don'?t\s+know\b|not\s+sure\b|prefer\s+not\b"
+    r"|not\s+applicable\b|n/?a\b)",
+    re.IGNORECASE,
+)
+
+
+def is_opt_out(text: str) -> bool:
+    """Whether this row offers a way out of answering rather than an answer."""
+    return bool(_OPT_OUT.match(text.strip())) or is_none_of_the_above(text)
+
+
 @dataclass
 class LabelledLine:
     """One row or column with its resolved label and extra attributes."""
@@ -85,13 +107,6 @@ def label_rows(options: list[OptionLine], *, element: str) -> list[LabelledLine]
             if is_checkbox:
                 # Radio needs no exclusive: only one answer is possible anyway.
                 attrs["exclusive"] = "1"
-
-        # A range the source stated for this row alone. Unlike a row_note this
-        # constrains the answer, so it is emitted rather than shown for
-        # reference; a row without one is left unconstrained.
-        if option.min_value is not None and option.max_value is not None:
-            attrs["min"] = option.min_value
-            attrs["max"] = option.max_value
 
         # Numbering precedence: a code the source gave, then the r91/r99
         # convention, then sequential. A source that codes Other as 97 means it;
