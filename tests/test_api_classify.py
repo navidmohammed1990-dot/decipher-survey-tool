@@ -48,6 +48,7 @@ def _clean_store():
 def fake_ai(monkeypatch):
     """Patch the endpoint's client factory with a canned classifier."""
     from app.api import routes_classify
+    from app.classify import ollama as ollama_module
     from app.classify.ollama import OllamaClient
 
     def install(payload=None, error=None):
@@ -60,6 +61,41 @@ def fake_ai(monkeypatch):
             def is_available(self):
                 return error is None
 
+            def list_models(self):
+                # Overridden so no real request is made. Without this the
+                # inherited status() reached a real Ollama on localhost, and
+                # these tests passed only on a machine that had none running -
+                # the suite quietly depending on the absence of the very thing
+                # the project needs.
+                return [] if error else [self.model]
+
+            def status(self):
+                if error:
+                    return {
+                        "available": False,
+                        "reachable": False,
+                        "model": self.model,
+                        "installed": [],
+                        "detail": f"Ollama is not reachable at {self.base_url}.",
+                    }
+                return {
+                    "available": True,
+                    "reachable": True,
+                    "model": self.model,
+                    "installed": [self.model],
+                    "detail": f"Ollama is ready with '{self.model}'.",
+                }
+
+        # Structural, not a matter of remembering: any real request from the
+        # classifier now fails loudly instead of quietly reporting whatever
+        # happens to be listening on the developer's own machine.
+        def no_network(*args, **kwargs):
+            raise AssertionError(
+                "a test reached the network; the fake client is incomplete"
+            )
+
+        monkeypatch.setattr(ollama_module.httpx, "get", no_network)
+        monkeypatch.setattr(ollama_module.httpx, "post", no_network)
         monkeypatch.setattr(routes_classify, "build_client", Fake)
 
     return install
